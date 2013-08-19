@@ -1,0 +1,2 @@
+testenv/**/*.db
+testenv/**/*.log*

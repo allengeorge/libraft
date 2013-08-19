@@ -1,0 +1,33 @@
+http:
+  port: 8080
+  adminPort: 8081
+
+database:
+  driverClass: org.h2.Driver
+  url: jdbc:h2:/tmp/kayvee
+  user: test
+
+raftDatabase:
+  # missing driverClass, username, password
+  # extra parameters
+  url: jdbc:h2:/tmp/raft
+  host: localhost
+  port: 3030
+
+cluster:
+  # extra parameters
+  id: SERVER_00
+
+  members:
+    - id: SERVER_00
+      kayVeeUrl: http://localhost:8080
+      raftEndpoint: localhost:9090
+    - id: SERVER_01
+      kayVeeUrl: http://localhost:8085
+      raftEndpoint: localhost:9095
+    - id: SERVER_02
+      kayVeeUrl: http://localhost:8090
+      raftEndpoint: localhost:9100
+
+logging:
+  level: DEBUG

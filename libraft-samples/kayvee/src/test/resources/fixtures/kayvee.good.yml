@@ -1,0 +1,33 @@
+http:
+  bindHost: localhost
+  port: 8080
+  adminPort: 8081
+
+database:
+  driverClass: org.h2.Driver
+  url: jdbc:h2:mem:test_kayvee
+  user: test
+  password: test
+
+raftDatabase:
+  driverClass: org.h2.Driver
+  url: jdbc:h2:mem:test_raft # FIXME (AG): can't end with semicolon
+  user: test
+  password: test
+
+cluster:
+  self: SERVER_00
+
+  members:
+    - id: SERVER_00
+      kayVeeUrl: http://localhost:8080
+      raftEndpoint: localhost:9080
+    - id: SERVER_01
+      kayVeeUrl: http://localhost:8085
+      raftEndpoint: localhost:9085
+    - id: SERVER_02
+      kayVeeUrl: http://localhost:8090
+      raftEndpoint: localhost:9090
+
+logging:
+  level: DEBUG

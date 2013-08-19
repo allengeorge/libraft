@@ -1,0 +1,27 @@
+{
+    "type": "APPEND_ENTRIES",
+    "source": "SERVER_03",
+    "destination": "SERVER_04",
+    "term": 32,
+    "commitIndex": 10,
+    "prevLogIndex": 17,
+    "prevLogTerm": 31,
+    "entries": [
+        {
+            "type": "CLIENT",
+            "index": 18,
+            "term": 31,
+            "command": "VEVTVA=="
+        },
+        {
+            "type": "NOOP",
+            "index": 19,
+            "term": 32
+        },
+        {
+            "type": "NOOP",
+            "index": 20,
+            "term": 32
+        }
+    ]
+}

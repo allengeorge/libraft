@@ -1,0 +1,34 @@
+{
+    "database": {
+        "driverClass": "org.h2.Driver",
+        "url": "jdbc:h2:test_db",
+        "user": "test",
+        "password": "test"
+    },
+
+    "cluster": {
+        "self": "S_00",
+        "members": [
+            {
+                "id": "S_00",
+                "endpoint": "192.168.1.100:9990"
+            },
+            {
+                "id": "S_01",
+                "endpoint": "192.168.1.100:9991"
+            },
+            {
+                "id": "S_02",
+                "endpoint": "192.168.1.100:9992"
+            },
+            {
+                "id": "S_03",
+                "endpoint": "192.168.1.100:9993"
+            },
+            {
+                "id": "S_04",
+                "endpoint": "192.168.1.100:9994"
+            }
+        ]
+    }
+}

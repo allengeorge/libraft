@@ -1,0 +1,8 @@
+{
+    "type": "REQUEST_VOTE",
+    "source": "SERVER_02",
+    "destination": "SERVER_04",
+    "term": 32,
+    "lastLogIndex": 10,
+    "lastLogTerm": 31
+}

@@ -1,0 +1,42 @@
+http:
+  port: 6085
+  adminPort: 6086
+  maxThreads: 5
+  minThreads: 2
+  acceptorThreads: 1
+
+database:
+  driverClass: org.sqlite.JDBC
+  url: jdbc:sqlite:s01-kayvee.db
+  user: test
+
+raftDatabase:
+  driverClass: org.sqlite.JDBC
+  url: jdbc:sqlite:s01-raft.db
+  user: test
+
+cluster:
+  self: SERVER_01
+
+  members:
+    - id: SERVER_00
+      kayVeeUrl: http://localhost:6080
+      raftEndpoint: localhost:9080
+    - id: SERVER_01
+      kayVeeUrl: http://localhost:6085
+      raftEndpoint: localhost:9085
+    - id: SERVER_02
+      kayVeeUrl: http://localhost:6090
+      raftEndpoint: localhost:9090
+
+logging:
+  level: debug
+
+  console:
+    enabled: true
+
+  file:
+    enabled: true
+    currentLogFilename: s01-kayvee.log
+    archivedLogFilenamePattern: s01-kayvee-%d.log.gz
+    archivedFileCount: 3

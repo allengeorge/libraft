@@ -1,0 +1,40 @@
+{
+    "id": "SELF",
+
+    "db": {
+        "url": "jdbc:h2:test_db",
+        "username": "test",
+        "password": "test"
+    },
+
+    "cluster": {
+        "id": "CLUSTER_1",
+        "members": [
+            {
+                "id": "SELF",
+                "listen_host": "192.168.1.100",
+                "listen_port": 9990
+            },
+            {
+                "id": "S_01",
+                "listen_host": "192.168.1.100",
+                "listen_port": 9991
+            },
+            {
+                "id": "S_02",
+                "listen_host": "192.168.1.100",
+                "listen_port": 9992
+            },
+            {
+                "id": "S_03",
+                "listen_host": "192.168.1.100",
+                "listen_port": 9993
+            },
+            {
+                "id": "S_04",
+                "listen_host": "192.168.1.100",
+                "listen_port": 9994
+            }
+        ]
+    }
+}

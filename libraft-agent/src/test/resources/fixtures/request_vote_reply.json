@@ -1,0 +1,7 @@
+{
+    "type": "REQUEST_VOTE_REPLY",
+    "source": "SERVER_01",
+    "destination": "SERVER_03",
+    "term": 9,
+    "voteGranted": false
+}

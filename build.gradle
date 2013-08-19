@@ -1,0 +1,253 @@
+/*
+ * Copyright (c) 2013, Allen A. George <allen dot george at gmail dot com>
+ *
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in the
+ *       documentation and/or other materials provided with the distribution.
+ *     * Neither the name of libraft nor the
+ *       names of its contributors may be used to endorse or promote products
+ *       derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+
+defaultTasks 'test'
+
+
+//
+// common project properties
+//
+
+// these have to be set here so that the correct values are used in the POM.
+// specifically, if version is not set, then the project(':libraft-*') dependencies
+// are generated with an 'unspecified' version, which is obviously incorrect
+// NOTE: these properties are plugin-INDEPENDENT (i.e., they always exist)
+// FIXME (AG): I don't understand why these have to be defined in "allprojects" instead of properties at the top level
+allprojects {
+    group = 'io.libraft'
+    version = currentVersion
+}
+
+//
+// extra properties
+// see: http://forums.gradle.org/gradle/topics/6caj90zrfqr0l
+//
+
+ext {
+    canonicalVersion = version.minus('-SNAPSHOT')
+    isReleaseVersion = !version.endsWith('SNAPSHOT')
+
+    consolidatedJavadocDir = "${rootDir}/javadoc"
+}
+
+//
+// sub-project definitions
+//
+
+subprojects {
+    // FIXME (AG): I don't understand why the maven definitions have to be inside the "subprojects" closure
+    configurations {
+        mavenDeployerJars
+    }
+
+    dependencies {
+        mavenDeployerJars "org.apache.maven.wagon:wagon-http:2.2"
+    }
+
+    // ignore the empty container 'libraft-samples' dir
+    // see: http://forums.gradle.org/gradle/topics/exclude_directories_that_aggregate_subprojects_from_being_built
+    if (name == 'libraft-samples') {
+        return
+    }
+
+    apply plugin: 'java'
+    apply plugin: 'maven'
+    apply plugin: 'signing'
+
+    // this property now exists, so define its value here
+    sourceCompatibility = '1.6'
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        compile 'org.slf4j:slf4j-api:1.7.+'
+        compile 'com.google.code.findbugs:jsr305:2.0.1'
+        compile 'com.google.guava:guava:14.0.+'
+        testCompile 'junit:junit:4.11'
+        testCompile 'org.mockito:mockito-core:1.9.5'
+        testCompile 'org.hamcrest:hamcrest-all:1.3'
+        testRuntime 'ch.qos.logback:logback-classic:1.0.+'
+        testRuntime 'org.codehaus.janino:janino:2.6.1'
+        testRuntime 'org.codehaus.janino:commons-compiler:2.6.1'
+    }
+
+    // resolve all Java API links
+    javadoc {
+        options.links 'http://docs.oracle.com/javase/6/docs/api/'
+    }
+
+    // only generate jars after running the tests
+    jar {
+        dependsOn test
+    }
+
+    task sourceJar(type: Jar, description: "Assembles a jar archive containing the source files") {
+        from sourceSets.main.allJava
+        classifier = 'sources'
+    }
+
+    task javadocJar(type: Jar, description: "Assembles a jar archive containing the javadoc files", dependsOn: javadoc) {
+        from "$docsDir"
+        classifier = 'javadoc'
+    }
+
+    // add the source and javadoc jars to the list of resulting artifacts
+    artifacts {
+        archives sourceJar, javadocJar
+    }
+
+    // sign all the artifacts for non-snapshot versions
+    signing {
+        required = isReleaseVersion
+        sign configurations.archives
+    }
+
+    // evaluate only after sub-project evaluation is done
+    // because certain properties such as "${project.description}"
+    // are only set in those build files, and the dependency
+    // here is a _configuration time_ dependency
+    afterEvaluate { project ->
+        // closure that configures the pom using the pom builder
+        // (for both maven install and uploadArchives) to generate
+        // Sonatype OSS compatible POMs
+        def configurePomClosure = {
+            name "${project.name}"
+            description "${project.description}"
+            url 'http://libraft.io'
+            inceptionYear '2013'
+            packaging 'jar'
+
+            licenses {
+                license {
+                    name 'The BSD 3-Clause License'
+                    url 'http://opensource.org/licenses/BSD-3-Clause'
+                    distribution 'repo'
+                }
+            }
+
+            scm {
+                url 'https://github.com/allengeorge/libraft.git'
+                connection 'scm:git:https://github.com/allengeorge/libraft.git'
+            }
+
+            developers {
+                developer {
+                    id 'allengeorge'
+                    name 'Allen George'
+                }
+            }
+        }
+
+        uploadArchives {
+            repositories {
+                mavenDeployer {
+                    configuration = configurations.mavenDeployerJars
+
+                    beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
+
+                    repository(url: "${mavenRepoBaseUrl}/service/local/staging/deploy/maven2") {
+                        authentication(userName: mavenUsername, password: mavenPassword)
+                    }
+
+                    snapshotRepository(url: "${mavenRepoBaseUrl}/content/repositories/snapshots") {
+                        authentication(userName: mavenUsername, password: mavenPassword)
+                    }
+
+                    // pom.version, pom.groupId are automatically set to
+                    // project.version and project.group. only artifactId needs customization
+                    pom.artifactId = "${project.name}"
+                    // generate a Sonatype OSS compatible project configuraiton
+                    pom.project configurePomClosure
+                }
+            }
+        }
+
+        install {
+            repositories {
+                mavenInstaller {
+                    pom.artifactId = "${project.name}"
+                    pom.project configurePomClosure
+                }
+            }
+        }
+    }
+
+    //
+    // task definitions and extensions
+    //
+
+    // FIXME (AG): there is probably a more idiomatic gradle way to define syncDocs and deleteDocs globally
+
+    // this task definition has to be inside the "subprojects" closure
+    // since it refers to project-specific properties such as docsDir and project.name
+    task syncDocs(type: Sync, description: "Copies generated javadoc to the consolidated gh-pages javadoc directory", dependsOn: javadoc) {
+        from "${docsDir}/javadoc"
+        into "${consolidatedJavadocDir}/${project.name}/${canonicalVersion}"
+    }
+
+    // this task definition has to be inside the "subprojects" closure
+    // because "clean" (below) refers to it
+    task deleteDocs(type: Delete, description: "Deletes the consolidated gh-pages javadoc directory") {
+        delete consolidatedJavadocDir
+    }
+
+    // also delete the consolidated javadoc dir when clean is called
+    clean {
+        dependsOn deleteDocs
+    }
+}
+
+//
+// global task definitions and extensions
+//
+
+task wrapper(type: Wrapper, description: "Generates a gradle wrapper to run the build") {
+    gradleVersion = '1.8'
+}
+
+//
+// signing key passphrase input
+//
+// read signing-key passphrase from console instead of sourcing it from gradle properties
+// this code copied verbatim from: http://www.gradle.org/docs/current/userguide/signing_plugin.html
+// this will not work in an automated environment (but nbd, because releases are not automated)
+//
+
+import org.gradle.plugins.signing.Sign
+
+gradle.taskGraph.whenReady { taskGraph ->
+    if (taskGraph.allTasks.any { it instanceof Sign } && isReleaseVersion) {
+        Console console = System.console()
+        console.printf "\n\n${version} Release: Signing Artifacts.\n".toString()
+        def signingKeyPassword = console.readPassword("PGP Private Key Password: ")
+        allprojects { ext."signing.password" = signingKeyPassword }
+    }
+}

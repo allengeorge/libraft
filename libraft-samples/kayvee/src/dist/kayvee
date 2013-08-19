@@ -1,0 +1,9 @@
+#!/bin/bash
+
+KAYVEE_JAR=$( find . -name kayvee*.jar )
+if [[ -z $KAYVEE_JAR ]]; then
+    echo "failed to find kayvee jar" >&2
+    exit 1
+fi
+
+java -jar $KAYVEE_JAR server kayvee.yml

@@ -1,0 +1,46 @@
+{
+    "rpcTimeout": 30,
+    "minElectionTimeout": 180,
+    "additionalElectionTimeoutRange": 120,
+    "heartbeatInterval": 15,
+    "connectTimeout": 5000,
+    "minReconnectInterval": 10000,
+    "additionalReconnectIntervalRange": 1000,
+    "database": {
+        "driverClass": "org.h2.Driver",
+        "url": "jdbc:h2:test_db",
+        "user": "test",
+        "password": "test"
+    },
+
+    "cluster": {
+        "self": "S_00",
+        "members": [
+            {
+                "id": "S_00",
+                "host": "192.168.1.100",
+                "port": 9990
+            },
+            {
+                "id": "S_01",
+                "host": "192.168.1.100",
+                "port": 9991
+            },
+            {
+                "id": "S_02",
+                "host": "192.168.1.100",
+                "port": 9992
+            },
+            {
+                "id": "S_03",
+                "host": "192.168.1.100",
+                "port": 9993
+            },
+            {
+                "id": "S_04",
+                "host": "192.168.1.100",
+                "port": 9994
+            }
+        ]
+    }
+}

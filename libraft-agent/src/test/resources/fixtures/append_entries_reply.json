@@ -1,0 +1,9 @@
+{
+    "type": "APPEND_ENTRIES_REPLY",
+    "source": "SERVER_01",
+    "destination": "SERVER_02",
+    "term": 99,
+    "prevLogIndex": 92,
+    "entryCount": 1,
+    "applied": true
+}

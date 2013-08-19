@@ -1,0 +1,47 @@
+http:
+  # port on which KayVee listens for client requests
+  port: 6080
+  # port on which KayVee listens for admin commands
+  adminPort: 6081
+
+database:
+  driverClass: org.sqlite.JDBC
+  url: jdbc:sqlite:kayvee.db
+  user: test
+  password: test
+
+raftDatabase:
+  driverClass: org.sqlite.JDBC
+  url: jdbc:sqlite:kayvee_raft.db
+  user: test
+  password: test
+
+cluster:
+  # unique id of _this_ server
+  self: SERVER_00
+
+  members:
+    # configuration block describing _this_ server
+    # uses settings defined in the 'http' block above for kayVeeUrl
+    - id: SERVER_00
+      kayVeeUrl: http://localhost:6080
+      raftEndpoint: localhost:9080
+    # configuration blocks for the _other_ servers
+    - id: SERVER_01
+      kayVeeUrl: http://localhost:6085
+      raftEndpoint: localhost:9085
+    - id: SERVER_02
+      kayVeeUrl: http://localhost:6090
+      raftEndpoint: localhost:9090
+
+logging:
+  level: INFO
+
+  console:
+    enabled: true
+
+  file:
+    enabled: true
+    currentLogFilename: kayvee.log
+    archivedLogFilenamePattern: kayvee-%d.log.gz
+    archivedFileCount: 3

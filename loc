@@ -1,0 +1,17 @@
+#!/bin/bash
+
+set -u
+set -e
+
+if ! type cloc 2&> /dev/null; then
+    echo "script requires cloc" >&2
+    exit 1
+fi
+
+EXCLUDED_FILES_FILE=$(mktemp -t excluded)
+cat > "$EXCLUDED_FILES_FILE" <<EOF
+gradlew
+loc
+EOF
+
+cloc . --exclude-dir=.git,.gradle,.idea,build,out,doc --exclude-ext=iml,bat,html --exclude-list-file="$EXCLUDED_FILES_FILE"
