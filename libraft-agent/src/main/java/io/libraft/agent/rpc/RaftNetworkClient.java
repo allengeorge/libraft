@@ -194,19 +194,22 @@ public final class RaftNetworkClient implements RPCSender {
         final AddressResolverHandler resolverHandler = new AddressResolverHandler();
         final FinalUpstreamHandler finalUpstreamHandler = new FinalUpstreamHandler(self.getId());
         final RPCHandler rpcHandler = new RPCHandler(self.getId(), cluster.keySet(), receiver);
+        final RPCConverters.RPCEncoder rpcEncoder = new RPCConverters.RPCEncoder(mapper);
+        final RPCConverters.RPCDecoder rpcDecoder = new RPCConverters.RPCDecoder(mapper);
 
         server = new ServerBootstrap(serverChannelFactory);
         server.setPipelineFactory(new ChannelPipelineFactory() {
             @Override
             public ChannelPipeline getPipeline() throws Exception {
                 ChannelPipeline pipeline = Channels.pipeline();
-                pipeline.addLast("decoder", new WireConverter.Decoder(mapper));
+                pipeline.addLast("frame-decoder", new Framers.FrameDecoder());
+                pipeline.addLast("handshake", new Handshakers.IncomingHandshakeHandler(mapper));
+                pipeline.addLast("rpc-decoder", rpcDecoder);
                 pipeline.addLast("raftrpc", rpcHandler);
                 pipeline.addLast("final", finalUpstreamHandler);
                 return pipeline;
             }
         });
-
 
         client = new ClientBootstrap(clientChannelFactory);
         client.setPipelineFactory(new ChannelPipelineFactory() {
@@ -214,7 +217,9 @@ public final class RaftNetworkClient implements RPCSender {
             public ChannelPipeline getPipeline() throws Exception {
                 ChannelPipeline pipeline = Channels.pipeline();
                 pipeline.addLast("resolver", resolverHandler);
-                pipeline.addLast("encoder", new WireConverter.Encoder(mapper));
+                pipeline.addLast("frame-encoder", new Framers.FrameEncoder());
+                pipeline.addLast("handshake", new Handshakers.OutgoingHandshakeHandler(self.getId(), mapper));
+                pipeline.addLast("rpc-encoder", rpcEncoder);
                 pipeline.addLast("final", finalUpstreamHandler);
                 return pipeline;
             }
