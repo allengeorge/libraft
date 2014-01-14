@@ -31,6 +31,8 @@ package io.libraft.agent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.ListeningExecutorService;
+import com.google.common.util.concurrent.MoreExecutors;
 import io.libraft.Command;
 import io.libraft.CommittedCommand;
 import io.libraft.NotLeaderException;
@@ -156,6 +158,7 @@ public class RaftAgent implements Raft {
     private final JDBCLog jdbcLog;
     private final WrappedTimer timer;
 
+    private ListeningExecutorService nonIoExecutorService;
     private ExecutorService ioExecutorService;
     private NioServerBossPool serverBossPool;
     private NioClientBossPool clientBossPool;
@@ -300,6 +303,7 @@ public class RaftAgent implements Raft {
         jdbcLog.initialize();
         jdbcStore.initialize();
 
+        nonIoExecutorService = MoreExecutors.listeningDecorator(Executors.newCachedThreadPool());
         ioExecutorService = Executors.newCachedThreadPool();
         serverBossPool = new NioServerBossPool(ioExecutorService, 1);
         clientBossPool = new NioClientBossPool(ioExecutorService, 1);
@@ -309,7 +313,7 @@ public class RaftAgent implements Raft {
         sharedWorkerPool = new ShareableWorkerPool<NioWorker>(workerPool);
         ServerSocketChannelFactory serverChannelFactory = new NioServerSocketChannelFactory(serverBossPool, sharedWorkerPool);
         ClientSocketChannelFactory clientChannelFactory = new NioClientSocketChannelFactory(clientBossPool, sharedWorkerPool);
-        raftNetworkClient.initialize(serverChannelFactory, clientChannelFactory, raftAlgorithm);
+        raftNetworkClient.initialize(nonIoExecutorService, serverChannelFactory, clientChannelFactory, raftAlgorithm);
 
         raftAlgorithm.initialize();
 
@@ -377,6 +381,7 @@ public class RaftAgent implements Raft {
         sharedWorkerPool.shutdown();
         sharedWorkerPool.destroy();
         ioExecutorService.shutdownNow();
+        nonIoExecutorService.shutdownNow();
 
         timer.stop();
 

@@ -31,6 +31,8 @@ package io.libraft.agent.rpc;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.ListeningExecutorService;
+import com.google.common.util.concurrent.MoreExecutors;
 import io.libraft.agent.ClusterMembersFixture;
 import io.libraft.agent.RaftAgentConstants;
 import io.libraft.agent.RaftMember;
@@ -58,6 +60,7 @@ import org.slf4j.LoggerFactory;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.Executors;
 
 public final class RaftNetworkClientTest {
 
@@ -68,6 +71,7 @@ public final class RaftNetworkClientTest {
     private final UnitTestCommandDeserializer commandDeserializer = new UnitTestCommandDeserializer();
     private final Random random = new Random();
     private final WrappedTimer timer = new WrappedTimer();
+    private final ListeningExecutorService nonIoExecutorService = MoreExecutors.listeningDecorator(Executors.newCachedThreadPool());
     private final DefaultLocalClientChannelFactory clientChannelFactory = new DefaultLocalClientChannelFactory();
     private final DefaultLocalServerChannelFactory serverChannelFactory = new DefaultLocalServerChannelFactory();
 
@@ -96,7 +100,7 @@ public final class RaftNetworkClientTest {
                         ClusterMembersFixture.RAFT_MEMBER_1
                 )
         );
-        client1.initialize(serverChannelFactory, clientChannelFactory, client1RPCReceiver);
+        client1.initialize(nonIoExecutorService, serverChannelFactory, clientChannelFactory, client1RPCReceiver);
         client1.start();
 
         client0 = newRaftNetworkClient(
@@ -109,7 +113,7 @@ public final class RaftNetworkClientTest {
                         ClusterMembersFixture.RAFT_MEMBER_1
                 )
         );
-        client0.initialize(serverChannelFactory, clientChannelFactory, client0RPCReceiver);
+        client0.initialize(nonIoExecutorService, serverChannelFactory, clientChannelFactory, client0RPCReceiver);
         client0.start();
     }
 
@@ -138,6 +142,7 @@ public final class RaftNetworkClientTest {
         client1.stop();
         serverChannelFactory.releaseExternalResources();
         clientChannelFactory.releaseExternalResources();
+        nonIoExecutorService.shutdownNow();
     }
 
     @Test

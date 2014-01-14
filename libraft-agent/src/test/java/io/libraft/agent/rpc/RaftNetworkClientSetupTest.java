@@ -30,6 +30,8 @@ package io.libraft.agent.rpc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.ListeningExecutorService;
+import com.google.common.util.concurrent.MoreExecutors;
 import io.libraft.agent.ClusterMembersFixture;
 import io.libraft.agent.RaftAgentConstants;
 import io.libraft.agent.RaftMember;
@@ -48,6 +50,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.HashSet;
 import java.util.Random;
+import java.util.concurrent.Executors;
 
 public final class RaftNetworkClientSetupTest {
 
@@ -59,6 +62,7 @@ public final class RaftNetworkClientSetupTest {
 
     private final Random random = new Random();
     private final WrappedTimer timer = new WrappedTimer();
+    private final ListeningExecutorService nonIoExecutorService = MoreExecutors.listeningDecorator(Executors.newCachedThreadPool());
     private final DefaultLocalServerChannelFactory serverChannelFactory = new DefaultLocalServerChannelFactory();
     private final DefaultLocalClientChannelFactory clientChannelFactory = new DefaultLocalClientChannelFactory();
 
@@ -88,6 +92,7 @@ public final class RaftNetworkClientSetupTest {
         raftNetworkClient.stop();
         serverChannelFactory.releaseExternalResources();
         clientChannelFactory.releaseExternalResources();
+        nonIoExecutorService.shutdownNow();
         timer.stop();
     }
 
@@ -99,7 +104,7 @@ public final class RaftNetworkClientSetupTest {
     @Test
     public void shouldStartSuccessfully() {
         RPCReceiver receiver = Mockito.mock(RPCReceiver.class);
-        raftNetworkClient.initialize(serverChannelFactory, clientChannelFactory, receiver);
+        raftNetworkClient.initialize(nonIoExecutorService, serverChannelFactory, clientChannelFactory, receiver);
         raftNetworkClient.start();
         raftNetworkClient.stop();
     }

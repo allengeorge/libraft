@@ -28,20 +28,25 @@
 
 package io.libraft.agent.rpc;
 
+import com.google.common.util.concurrent.MoreExecutors;
 import io.libraft.agent.TestLoggingRule;
 import org.hamcrest.Matchers;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelFuture;
 import org.jboss.netty.channel.ChannelHandlerContext;
+import org.jboss.netty.channel.ChannelPipeline;
 import org.jboss.netty.channel.ChannelState;
 import org.jboss.netty.channel.ChannelStateEvent;
 import org.jboss.netty.channel.DefaultChannelFuture;
+import org.jboss.netty.channel.DefaultExceptionEvent;
 import org.jboss.netty.channel.DownstreamChannelStateEvent;
 import org.jboss.netty.channel.local.LocalAddress;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,7 +54,9 @@ import java.net.InetSocketAddress;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
+import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.refEq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -60,7 +67,7 @@ public final class AddressResolverHandlerTest {
 
     private final ChannelHandlerContext ctx = mock(ChannelHandlerContext.class);
     private final Channel channel = mock(Channel.class);
-    private final AddressResolverHandler handler = new AddressResolverHandler();
+    private final AddressResolverHandler handler = new AddressResolverHandler(MoreExecutors.listeningDecorator(MoreExecutors.sameThreadExecutor()));
 
     @Rule
     public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
@@ -77,7 +84,7 @@ public final class AddressResolverHandlerTest {
                 channel,
                 originalEventFuture,
                 ChannelState.CONNECTED,
-                InetSocketAddress.createUnresolved("localhost", 9999) // technically, this should be the remote address
+                createUnresolvedRemoteAddress()
         );
 
         handler.connectRequested(ctx, event);
@@ -100,7 +107,7 @@ public final class AddressResolverHandlerTest {
                 channel,
                 new DefaultChannelFuture(channel, false),
                 ChannelState.CONNECTED,
-                new InetSocketAddress("localhost", 9999) // technically, this should be the remote address
+                new InetSocketAddress("localhost", 9999)
         );
 
         handler.connectRequested(ctx, event);
@@ -120,5 +127,88 @@ public final class AddressResolverHandlerTest {
         handler.connectRequested(ctx, event);
 
         verify(ctx).sendDownstream(refEq(event));
+    }
+
+    @Test
+    public void shouldFireExceptionIfAddressResolutionTaskFails() throws Exception {
+        setupPipelineToRunFireEventLaterInline();
+
+        // setup the address resolver to throw an exception
+        final IllegalStateException resolveFailureCause = new IllegalStateException("simulate resolve failure");
+        AddressResolverHandler.ResolvedAddressProvider failingResolver = new AddressResolverHandler.ResolvedAddressProvider() {
+            @Override
+            public InetSocketAddress createResolved(InetSocketAddress unresolvedAddress) throws Exception {
+                throw resolveFailureCause;
+            }
+        };
+
+        // fire a connect request with an unresolved address
+        AddressResolverHandler failingHandler = new AddressResolverHandler(MoreExecutors.listeningDecorator(MoreExecutors.sameThreadExecutor()), failingResolver);
+
+        DefaultChannelFuture originalEventFuture = new DefaultChannelFuture(channel, false);
+        ChannelStateEvent event = new DownstreamChannelStateEvent(
+                channel,
+                originalEventFuture,
+                ChannelState.CONNECTED,
+                createUnresolvedRemoteAddress()
+        );
+
+        failingHandler.connectRequested(ctx, event);
+
+        // this should cause a "fireExceptionCaughtLater" call
+        ArgumentCaptor<DefaultExceptionEvent> exceptionEventCaptor = ArgumentCaptor.forClass(DefaultExceptionEvent.class);
+        verify(ctx).sendUpstream(exceptionEventCaptor.capture());
+
+        DefaultExceptionEvent exceptionEvent = exceptionEventCaptor.getValue();
+        assertThat(exceptionEvent.getCause(), Matchers.<Throwable>is(resolveFailureCause));
+    }
+
+    @Test
+    public void shouldFireExceptionIfConnectEventCannotBeForwarded() throws Exception {
+        setupPipelineToRunFireEventLaterInline();
+
+        // setup the ctx to throw an exception when we attempt to send the connected event downstream
+        IllegalStateException resolveFailureCause = new IllegalStateException("downstream event failed");
+        doThrow(resolveFailureCause).when(ctx).sendDownstream(any(DownstreamChannelStateEvent.class));
+
+        // initiate the connect request
+        DefaultChannelFuture originalEventFuture = new DefaultChannelFuture(channel, false);
+        ChannelStateEvent event = new DownstreamChannelStateEvent(
+                channel,
+                originalEventFuture,
+                ChannelState.CONNECTED,
+                createUnresolvedRemoteAddress()
+        );
+
+        handler.connectRequested(ctx, event);
+
+        // firing the connect downstream should cause a "fireExceptionCaughtLater" call
+        ArgumentCaptor<DefaultExceptionEvent> exceptionEventCaptor = ArgumentCaptor.forClass(DefaultExceptionEvent.class);
+        verify(ctx).sendUpstream(exceptionEventCaptor.capture());
+
+        DefaultExceptionEvent exceptionEvent = exceptionEventCaptor.getValue();
+        assertThat(exceptionEvent.getCause(), Matchers.<Throwable>is(resolveFailureCause));
+    }
+
+    private static InetSocketAddress createUnresolvedRemoteAddress() {
+        return InetSocketAddress.createUnresolved("localhost", 9999);
+    }
+
+    private void setupPipelineToRunFireEventLaterInline() {
+        // setup the ctx/pipeline to run a "fire<Event>Later" task immediately, inline
+        ChannelPipeline pipeline = mock(ChannelPipeline.class);
+        when(ctx.getPipeline()).thenReturn(pipeline);
+        when(pipeline.execute(any(Runnable.class))).then(new Answer<Void>() {
+            @Override
+            public Void answer(InvocationOnMock invocation) throws Throwable {
+                Object[] arguments = invocation.getArguments();
+                assertThat(arguments.length, equalTo(1));
+
+                Runnable task = (Runnable) arguments[0];
+                task.run();
+
+                return null;
+            }
+        });
     }
 }

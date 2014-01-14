@@ -30,6 +30,7 @@ package io.libraft.agent.rpc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Maps;
+import com.google.common.util.concurrent.ListeningExecutorService;
 import io.libraft.agent.RaftMember;
 import io.libraft.agent.protocol.AppendEntries;
 import io.libraft.agent.protocol.AppendEntriesReply;
@@ -180,18 +181,23 @@ public final class RaftNetworkClient implements RPCSender {
      * outgoing connections. As a result the caller still has
      * exclusive access to underlying system resources.
      *
+     * @param nonIoExecutorService shared instance of {@code ListeningExecutorService} used to handle any non-io tasks (address-resolution, etc.)
      * @param serverChannelFactory instance of {@code ServerChannelFactory} used to handle incoming connections from remote Raft servers
      * @param clientChannelFactory instance of {@code ChannelFactory} used to create outgoing connections to remote Raft servers
      * @param receiver instance of {@code RPCReceiver} that will be notified of incoming {@link RaftRPC} messages
      * @throws IllegalStateException if this method is called multiple times
      */
-    public void initialize(ServerChannelFactory serverChannelFactory, ChannelFactory clientChannelFactory, RPCReceiver receiver) {
+    public void initialize(
+            ListeningExecutorService nonIoExecutorService,
+            ServerChannelFactory serverChannelFactory,
+            ChannelFactory clientChannelFactory,
+            RPCReceiver receiver) {
         checkState(!running.get());
 
         checkState(server == null);
         checkState(client == null);
 
-        final AddressResolverHandler resolverHandler = new AddressResolverHandler();
+        final AddressResolverHandler resolverHandler = new AddressResolverHandler(nonIoExecutorService); // sharable, because it is using the default provider
         final FinalUpstreamHandler finalUpstreamHandler = new FinalUpstreamHandler(self.getId());
         final RPCHandler rpcHandler = new RPCHandler(self.getId(), cluster.keySet(), receiver);
         final RPCConverters.RPCEncoder rpcEncoder = new RPCConverters.RPCEncoder(mapper);
