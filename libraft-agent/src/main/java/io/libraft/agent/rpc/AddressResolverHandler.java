@@ -28,38 +28,139 @@
 
 package io.libraft.agent.rpc;
 
-import org.jboss.netty.channel.ChannelHandler;
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.ListeningExecutorService;
 import org.jboss.netty.channel.ChannelHandlerContext;
 import org.jboss.netty.channel.ChannelStateEvent;
+import org.jboss.netty.channel.Channels;
 import org.jboss.netty.channel.DownstreamChannelStateEvent;
 import org.jboss.netty.channel.SimpleChannelDownstreamHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
+import java.util.concurrent.Callable;
 
-// FIXME (AG): resolve the address on an external executor
 /**
- * Stateless {@code ChannelHandler} that resolves an
- * <strong>unresolved</strong> {@link InetSocketAddress}
- * <strong>on the network IO thread</strong> before
- * initiating an outgoing connection. If the OS name-resolution
- * service is unavailable this <strong>can starve</strong>
- * already-connected {@link org.jboss.netty.channel.Channel} instances.
+ * {@code ChannelHandler} that automatically resolves
+ * unresolved {@link InetSocketAddress} instances
+ * on the supplied {@link ListeningExecutorService} before
+ * initiating outgoing connections. The connection is established
+ * immediately if the remote address is already resolved.
+ * <p/>
+ * Implementations may or may not be stateless depending on
+ * the {@link ResolvedAddressProvider} implementation used.
+ * If no {@code ResolvedAddressProvider} is specified a
+ * {@link ResolvedAddressProvider#DEFAULT_PROVIDER} is used. This
+ * implementation is stateless, allowing a single
+ * instance of this handler to be shared across multiple
+ * channels.
  */
-@ChannelHandler.Sharable
 final class AddressResolverHandler extends SimpleChannelDownstreamHandler {
 
-    @Override
-    public void connectRequested(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
-        ChannelStateEvent forwardedEvent = e;
+    /**
+     * Implemented by classes that construct a resolved
+     * {@link InetSocketAddress} from an unresolved {@code InetSocketAddress}.
+     * <p/>
+     * Ideally, implementations <strong>should</strong> be
+     * thread-safe, and stateless if possible.
+     */
+    static interface ResolvedAddressProvider {
 
-        if (e.getValue() instanceof InetSocketAddress) {
-            InetSocketAddress connectAddress = (InetSocketAddress) e.getValue();
-            if (connectAddress.isUnresolved()) {
-                connectAddress = new InetSocketAddress(connectAddress.getHostName(), connectAddress.getPort());
-                forwardedEvent = new DownstreamChannelStateEvent(e.getChannel(), e.getFuture(), e.getState(), connectAddress);
+        /**
+         * Construct a resolved {@code InetSocketAddress} given an unresolved {@code InetSocketAddress}.
+         *
+         * @param unresolvedAddress unresolved {@code InetSocketAddress} instance
+         * @return resolved {@code InetSocketAddress} instance
+         *
+         * @throws Exception if name resolution cannot be performed or a resolved
+         * {@code InetSocketAddress} cannot be constructed
+         */
+        InetSocketAddress createResolved(InetSocketAddress unresolvedAddress) throws Exception;
+
+        /**
+         * Stateless implementation of {@link ResolvedAddressProvider}.
+         * <p/>
+         * This implementation relies on Java's name-resolution mechanism,
+         * and creates a new {@link InetSocketAddress} using the unresolved address' host/port.
+         */
+        final static ResolvedAddressProvider DEFAULT_PROVIDER = new ResolvedAddressProvider() {
+            @Override
+            public InetSocketAddress createResolved(InetSocketAddress unresolvedAddress) throws Exception {
+                return new InetSocketAddress(unresolvedAddress.getHostName(), unresolvedAddress.getPort());
             }
+        };
+    }
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(AddressResolverHandler.class);
+
+    private final ListeningExecutorService resolveService;
+    private final ResolvedAddressProvider resolvedAddressProvider;
+
+    /**
+     * Constructor.
+     *
+     * @param resolveService instance of {@code ListeningExecutorService} that can run name resolution tasks
+     */
+    AddressResolverHandler(ListeningExecutorService resolveService) {
+        this(resolveService, ResolvedAddressProvider.DEFAULT_PROVIDER);
+    }
+
+    /**
+     * Constructor.
+     *
+     * @param resolveService instance of {@code ListeningExecutorService} that can run name resolution tasks
+     * @param resolvedAddressProvider instance of {@code ResolvedAddressProvider} that constructs a resolved
+     *                                {@link InetSocketAddress} from an unresolved one
+     */
+    AddressResolverHandler(ListeningExecutorService resolveService, ResolvedAddressProvider resolvedAddressProvider) {
+        this.resolveService = resolveService;
+        this.resolvedAddressProvider = resolvedAddressProvider;
+    }
+
+    @Override
+    public void connectRequested(final ChannelHandlerContext ctx, final ChannelStateEvent e) throws Exception {
+        if (!(e.getValue() instanceof InetSocketAddress)) {
+            super.connectRequested(ctx, e);
+            return;
         }
 
-        super.connectRequested(ctx, forwardedEvent);
+        final InetSocketAddress originalAddress = (InetSocketAddress) e.getValue();
+
+        if (!originalAddress.isUnresolved()) {
+            super.connectRequested(ctx, e);
+            return;
+        }
+
+        ListenableFuture<InetSocketAddress> resolvedFuture = resolveService.submit(new Callable<InetSocketAddress>() {
+            @Override
+            public InetSocketAddress call() throws Exception {
+                return resolvedAddressProvider.createResolved(originalAddress);
+            }
+        });
+
+        Futures.addCallback(resolvedFuture, new FutureCallback<InetSocketAddress>() {
+            @Override
+            public void onSuccess(InetSocketAddress resolvedAddress) {
+                try {
+                    DownstreamChannelStateEvent forwardedEvent = new DownstreamChannelStateEvent(e.getChannel(), e.getFuture(), e.getState(), resolvedAddress);
+                    AddressResolverHandler.super.connectRequested(ctx, forwardedEvent);
+                } catch (Exception cause) {
+                    failConnect(cause);
+                }
+            }
+
+            @Override
+            public void onFailure(Throwable cause) {
+                failConnect(cause);
+            }
+
+            private void failConnect(Throwable cause) {
+                LOGGER.warn("fail connect to unresolved address:{}", originalAddress, cause);
+                Channels.fireExceptionCaughtLater(ctx, cause);
+            }
+        });
     }
 }
