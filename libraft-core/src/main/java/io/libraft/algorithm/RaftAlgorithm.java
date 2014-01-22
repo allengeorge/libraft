@@ -682,6 +682,20 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         return leader;
     }
 
+    /**
+     * Get the nextIndex for the specified {@code server} in the Raft cluster.
+     *
+     * @param server unique id of the server for which nextIndex should be returned
+     * @return log index >= 0 of the nextIndex for the server
+     */
+    synchronized long getNextIndex(String server) {
+        checkState(role == Role.LEADER, "role:%s", role);
+        checkState(self.equals(leader), "self:%s leader:%s", self, leader);
+        checkState(serverData.containsKey(server), "server:%s", server);
+
+        return serverData.get(server).nextIndex;
+    }
+
     private void logNotRunning() {
         LOGGER.warn("{}: algorithm has been stopped", self);
     }
