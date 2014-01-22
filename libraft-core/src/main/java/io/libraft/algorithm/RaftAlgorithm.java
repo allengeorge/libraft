@@ -1093,7 +1093,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         }
 
         checkState(role == Role.LEADER, "role:%s", role);
-        checkState(leader.equals(self), "self:%s leader:%s", self, leader);
+        checkState(self.equals(leader), "self:%s leader:%s", self, leader);
 
         heartbeat(currentTerm);
     }
@@ -1451,7 +1451,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             }
 
             checkState(role == Role.LEADER, "role:%s", role);
-            checkState(leader.equals(self), "self:%s leader:%s", self, leader);
+            checkState(self.equals(leader), "self:%s leader:%s", self, leader);
 
             ServerDatum serverDatum = checkNotNull(serverData.get(server), "no server data for %s", server);
 
