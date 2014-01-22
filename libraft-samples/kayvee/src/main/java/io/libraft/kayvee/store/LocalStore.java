@@ -45,6 +45,8 @@ import static com.google.common.base.Preconditions.checkState;
  * Represents the local server's view of the replicated key-value store.
  * Methods in the class are called to transform the local server's key-value
  * state whenever a {@link KayVeeCommand} is committed to the cluster.
+ * <p/>
+ * This component is <strong>not</strong> thread-safe.
  */
 public class LocalStore {
 
@@ -67,13 +69,29 @@ public class LocalStore {
 
     private final DBI dbi;
 
+    private boolean initialized;
+
     public LocalStore(DBI dbi) {
         this.dbi = dbi;
     }
 
     // NOTE: avoid early returns, because it may prevent updateLastAppliedCommandIndex() from being called
 
+    /**
+     * Initialize this component's internal data structures.
+     * <p/>
+     * This method:
+     * <ul>
+     *     <li>Must be called before any other method.</li>
+     *     <li>Must <strong>not</strong> be called simultaneously by
+     *         multiple threads (the result is undefined).</li>
+     * </ul>
+     *
+     * @throws IllegalStateException if this method is called multiple times
+     */
     public void initialize() {
+        checkState(!initialized);
+
         dbi.inTransaction(new TransactionCallback<Void>() {
             @Override
             public Void inTransaction(Handle conn, TransactionStatus status) throws Exception {
@@ -93,6 +111,8 @@ public class LocalStore {
                 return null;
             }
         });
+
+        initialized = true;
     }
 
     long getLastAppliedCommandIndex() {
