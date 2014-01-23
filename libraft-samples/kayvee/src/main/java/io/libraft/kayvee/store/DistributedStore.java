@@ -49,7 +49,6 @@ import javax.annotation.Nullable;
 import java.util.Collection;
 import java.util.Random;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.google.common.base.Preconditions.checkState;
 
@@ -61,6 +60,8 @@ import static com.google.common.base.Preconditions.checkState;
  * are committed they are locally applied to {@link LocalStore}. Since
  * each server in the cluster applies the committed {@code KayVeeCommand}
  * to {@code LocalStore} this transforms the cluster's distributed key-value state.
+ * <p/>
+ * This component is thread-safe.
  */
 public class DistributedStore implements Managed, RaftListener {
 
@@ -68,8 +69,9 @@ public class DistributedStore implements Managed, RaftListener {
 
     private final ConcurrentMap<Long, SettableFuture<?>> pendingCommands = Maps.newConcurrentMap();
     private final Random random = new Random();
-    private final AtomicBoolean running = new AtomicBoolean(false); // set during startup and shutdown; accessed by multiple threads
     private final LocalStore localStore;
+
+    private volatile boolean running; // set during start/stop and accessed by multiple threads
 
     // these values are set _once_ during startup
     // safe to access by multiple threads following call to start()
@@ -85,7 +87,7 @@ public class DistributedStore implements Managed, RaftListener {
         this.raftAgent = raftAgent;
     }
 
-    public void initialize() throws StorageException {
+    public synchronized void initialize() throws StorageException {
         checkState(raftAgent != null);
         checkState(!initialized);
 
@@ -111,24 +113,28 @@ public class DistributedStore implements Managed, RaftListener {
     }
 
     @Override
-    public void start() {
-        checkState(raftAgent != null);
-        checkState(initialized);
-
-        if (!running.compareAndSet(false, true)) {
+    public synchronized void start() {
+        if (running) {
             return;
         }
 
+        checkState(raftAgent != null);
+        checkState(initialized);
+
         raftAgent.start();
+
+        running = true;
     }
 
     @Override
-    public void stop() throws Exception {
-        if (!running.compareAndSet(true, false)) {
+    public synchronized void stop() throws Exception {
+        if (!running) {
             return;
         }
 
         raftAgent.stop();
+
+        running = false;
     }
 
     // IMPORTANT: DO NOT HOLD A LOCK WHEN CALLING issueCommandToCluster OR IN THE onLeadershipChange CALLBACK
@@ -143,7 +149,7 @@ public class DistributedStore implements Managed, RaftListener {
 
     @Override
     public void applyCommand(long index, Command command) {
-        if (!running.get()) {
+        if (!running) {
             LOGGER.warn("store no longer active - not applying {} at index {}", command, index);
             return;
         }
@@ -268,7 +274,7 @@ public class DistributedStore implements Managed, RaftListener {
     }
 
     private void checkThatDistributedStoreIsActive() {
-        checkState(running.get());
+        checkState(running);
     }
 
     private long getCommandId() {
@@ -297,6 +303,9 @@ public class DistributedStore implements Managed, RaftListener {
                 }
             });
 
+            // it's possible for this to throw an IllegalStateException
+            // if another thread calls "stop" while a request is just about to be submitted
+            // since access to raftAgent itself is not synchronized here
             ListenableFuture<Void> consensusFuture = raftAgent.submitCommand(kayVeeCommand);
             Futures.addCallback(consensusFuture, new FutureCallback<Void>() {
                 @Override
