@@ -230,7 +230,7 @@ subprojects {
 //
 
 task wrapper(type: Wrapper, description: "Generates a gradle wrapper to run the build") {
-    gradleVersion = '1.8'
+    gradleVersion = '1.10'
 }
 
 //
