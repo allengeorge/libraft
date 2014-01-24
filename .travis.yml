@@ -2,3 +2,9 @@ language: java
 
 jdk:
     - openjdk6
+
+env:
+    - TERM=dumb
+
+after_success:
+    - gradle jacocoTestReport coveralls

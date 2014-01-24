@@ -29,6 +29,21 @@
 
 defaultTasks 'test'
 
+//
+// top-level build plugins
+// see: https://github.com/kt3k/coveralls-gradle-plugin
+//
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'org.kt3k.gradle.plugin:coveralls-gradle-plugin:0.2.4'
+    }
+}
+
 
 //
 // common project properties
@@ -85,16 +100,30 @@ subprojects {
     }
 
     apply plugin: 'java'
+    apply plugin: 'jacoco'
+    apply plugin: 'coveralls'
     apply plugin: 'maven'
     apply plugin: 'signing'
 
-    // this property now exists, so define its value here
+    // these properties now exist, so define their values here
+
+    // Java 1.6 syntax
     sourceCompatibility = '1.6'
 
+    // jacoco properties
+    jacocoTestReport {
+        reports {
+            html.enabled = true // human-readable
+            xml.enabled = true  // coveralls plugin depends on xml format report
+        }
+    }
+
+    // default repository
     repositories {
         mavenCentral()
     }
 
+    // common dependencies
     dependencies {
         compile 'org.slf4j:slf4j-api:1.7.+'
         compile 'com.google.code.findbugs:jsr305:2.0.1'
