@@ -50,10 +50,18 @@ allprojects {
 //
 
 ext {
+    // version
     canonicalVersion = version.minus('-SNAPSHOT')
     isReleaseVersion = !version.endsWith('SNAPSHOT')
 
+    // directories
     consolidatedJavadocDir = "${rootDir}/javadoc"
+
+    // default maven credentials
+    // it's safe to set defaults here because any values
+    // specified in .gradle/gradle.properties override these
+    mavenUsername = 'bogusUsername'
+    mavenPassword = 'bogusPassword'
 }
 
 //
@@ -230,7 +238,7 @@ subprojects {
 //
 
 task wrapper(type: Wrapper, description: "Generates a gradle wrapper to run the build") {
-    gradleVersion = '1.8'
+    gradleVersion = '1.10'
 }
 
 //

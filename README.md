@@ -1,4 +1,4 @@
-# libraft
+# libraft [![Build Status](https://travis-ci.org/allengeorge/libraft.png?branch=master)](https://travis-ci.org/allengeorge/libraft)
 
 libraft is a Java library that implements the [Raft distributed consensus protocol]
 (https://ramcloud.stanford.edu/wiki/download/attachments/11370504/raft.pdf "In Search of an Understandable Consensus Algorithm").
