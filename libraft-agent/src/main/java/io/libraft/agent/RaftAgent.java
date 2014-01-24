@@ -71,7 +71,7 @@ import java.util.concurrent.Executors;
 import static com.google.common.base.Preconditions.checkState;
 
 /**
- * Interface to the Raft cluster.
+ * Component for controlling and interacting with the Raft cluster.
  * <p/>
  * This class:
  * <ul>
@@ -115,6 +115,8 @@ import static com.google.common.base.Preconditions.checkState;
  *     <li>{@link RaftAgent#setupCustomCommandSerializationAndDeserialization(CommandSerializer, CommandDeserializer)}</li>
  * </ul>
  * For examples on setting up both kinds of serialization and deserialization see {@code RaftAgentTest}.
+ * <p/>
+ * This component is thread-safe.
  */
 public class RaftAgent implements Raft {
 
@@ -165,7 +167,8 @@ public class RaftAgent implements Raft {
     private NioWorkerPool workerPool;
     private ShareableWorkerPool<NioWorker> sharedWorkerPool;
 
-    private volatile boolean running;
+    private volatile boolean running; // set during start/stop and accessed by multiple threads
+
     private boolean setupConversion;
     private boolean initialized;
 
@@ -392,6 +395,11 @@ public class RaftAgent implements Raft {
         initialized = false;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @throws IllegalStateException if this method is called before {@code RaftAgent} is initialized
+     */
     @Override
     public @Nullable CommittedCommand getNextCommittedCommand(long indexToSearchFrom) {
         checkState(setupConversion);
@@ -400,9 +408,23 @@ public class RaftAgent implements Raft {
         return raftAlgorithm.getNextCommittedCommand(indexToSearchFrom);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @throws IllegalStateException if this method is called when {@code RaftAgent} is not running
+     */
     @Override
     public ListenableFuture<Void> submitCommand(Command command) throws NotLeaderException {
         checkState(running); // implies conversion setup and initialization happened
+
+        // since access to raftAlgorithm is not serialized
+        // here it's possible for raftAlgorithm to be stopped
+        // by one thread in the time between a caller thread
+        // doing a successful check above and calling submitCommand
+        // below, triggering an ISE. I judge this acceptable.
+        // The alternative is serializing access to raftAlgorithm here
+        // (raftAlgorithm methods themselves are serialized) and
+        // holding yet another lock while calling into raftAlgorithm
 
         return raftAlgorithm.submitCommand(command);
     }
