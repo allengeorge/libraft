@@ -141,11 +141,6 @@ subprojects {
         options.links 'http://docs.oracle.com/javase/6/docs/api/'
     }
 
-    // only generate jars after running the tests
-    jar {
-        dependsOn test
-    }
-
     task sourceJar(type: Jar, description: "Assembles a jar archive containing the source files") {
         from sourceSets.main.allJava
         classifier = 'sources'
