@@ -1,4 +1,4 @@
-# libraft [![Build Status](https://travis-ci.org/allengeorge/libraft.png?branch=master)](https://travis-ci.org/allengeorge/libraft)
+# libraft [![Build Status](https://travis-ci.org/allengeorge/libraft.png?branch=master)](https://travis-ci.org/allengeorge/libraft) [![Coverage Status](https://coveralls.io/repos/allengeorge/libraft/badge.png?branch=master)](https://coveralls.io/r/allengeorge/libraft?branch=master)
 
 libraft is a Java library that implements the [Raft distributed consensus protocol]
 (https://ramcloud.stanford.edu/wiki/download/attachments/11370504/raft.pdf "In Search of an Understandable Consensus Algorithm").
@@ -382,5 +382,6 @@ Just *some* of the open-source software libraft uses include:
 * [jdbi] (http://www.jdbi.org "JDBI")
 * [sqlite-jdbc (xerial)] (https://bitbucket.org/xerial/sqlite-jdbc "SQLite JDBC Driver")
 * [gradle] (http://www.gradle.org "Gradle - Build Automation Evolved")
+* [coveralls-gradle-plugin] (https://github.com/kt3k/coveralls-gradle-plugin "Coveralls Gradle Plugin")
 
 It's this - and much, much more! - that makes libraft possible.
