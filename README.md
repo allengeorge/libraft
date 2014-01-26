@@ -5,7 +5,10 @@ libraft is a Java library that implements the [Raft distributed consensus protoc
 
 ## Release History
 
-**0.1.0**: Initial release. (11 December, 2013)
+* **0.1.0**: Initial release. (11 Dec, 2013)
+* **0.1.1**: Bug-fix release. (25 Jan, 2014)
+
+For more information check the detailed [release history] (https://github.com/allengeorge/libraft/wiki/Release-History "libraft release history").
 
 ## Features
 
@@ -318,7 +321,7 @@ For more examples, see `KayVee.java` in `libraft-samples/kayvee` and `RaftAgentT
 
 ## Building libraft
 
-libraft requires java 1.6+ and gradle 1.8+ to build.
+libraft requires java 1.6 and gradle 1.10+ to build.
 
 To build and install into the local maven cache, run `gradle` from the repository root.
 
@@ -339,20 +342,14 @@ To clean build artifacts run `gradle clean` or `gradlew clean` from the reposito
 
 ## Issues
 
-### Safety
+The full list of issues can be seen at
+[Github Issues] (https://github.com/allengeorge/libraft/issues "libraft issues").
 
 There are no known safety issues.
 
-### Other
+## Reporting Issues
 
-1. Duplicate heartbeats can prevent Raft servers from making progress. (#16)
-2. During a partition, leaders may *never* know when they lose leadership. (This does not compromise safety because, even if they think they are the leader, these nodes cannot commit entries.) (#6)
-3. Searching for a matching log prefix is slow, especially when there are many unapplied entries. (#13, #15)
-4. Frame sizes at the network layer may prevent followers from making progress when there are many unapplied entries. (#11)
-
-### Reporting
-
-Please submit all code or documentation issues, comments/concerns or feature requests to
+Please submit all code or documentation issues, comments and concerns or feature requests to
 [Github Issues] (https://github.com/allengeorge/libraft/issues "libraft issues").
 
 If you have other libraft or Raft questions, please post to the
@@ -372,6 +369,7 @@ Just *some* of the open-source software libraft uses include:
 * [mockito] (https://code.google.com/p/mockito/ "Simpler & better mocking")
 * [hamcrest] (https://code.google.com/p/hamcrest/ "Hamcrest - Library of Matchers for Building Test Expressions")
 * [logback] (http://logback.qos.ch/ "The Generic, Reliable Fast & Flexible Logging Framework")
+* [jacoco] (http://www.eclemma.org/jacoco/ "JaCoCo Java Code Coverage Library")
 * [netty] (http://www.netty.io "netty")
 * [jackson] (https://github.com/FasterXML/jackson "FasterXML/Jackson")
 * [hibernate validator] (http://www.hibernate.org/subprojects/validator.html "Bean Validation Reference Implementation")
