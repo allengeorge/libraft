@@ -31,7 +31,6 @@ package io.libraft.kayvee.configuration;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Objects;
 import com.yammer.dropwizard.config.Configuration;
-import com.yammer.dropwizard.db.DatabaseConfiguration;
 import io.libraft.agent.configuration.RaftDatabaseConfiguration;
 
 import javax.validation.Valid;
@@ -42,21 +41,15 @@ import javax.validation.constraints.NotNull;
 // contain all the standard Dropwizard configuration stanzas
 /**
  * Defines the root KayVee configuration. Contains
- * 3 extra blocks on top of the standard blocks and properties supplied
+ * 2 extra blocks on top of the standard blocks and properties supplied
  * by Dropwizard:
  * <ul>
- *     <li>database</li>
  *     <li>raftDatabase</li>
  *     <li>cluster</li>
  * </ul>
  * See the KayVee README.md for more on the KayVee configuration.
  */
 public class KayVeeConfiguration extends Configuration {
-
-    @Valid
-    @NotNull
-    @JsonProperty("database")
-    private DatabaseConfiguration databaseConfiguration;
 
     @Valid
     @NotNull
@@ -67,14 +60,6 @@ public class KayVeeConfiguration extends Configuration {
     @NotNull
     @JsonProperty("cluster")
     private ClusterConfiguration clusterConfiguration;
-
-    public DatabaseConfiguration getDatabaseConfiguration() {
-        return databaseConfiguration;
-    }
-
-    public void setDatabaseConfiguration(DatabaseConfiguration databaseConfiguration) {
-        this.databaseConfiguration = databaseConfiguration;
-    }
 
     public RaftDatabaseConfiguration getRaftDatabaseConfiguration() {
         return raftDatabaseConfiguration;
@@ -104,7 +89,6 @@ public class KayVeeConfiguration extends Configuration {
 
         return getHttpConfiguration().getBindHost().equals(other.getHttpConfiguration().getBindHost())
                 && getHttpConfiguration().getPort() == other.getHttpConfiguration().getPort()
-                && databaseConfiguration.equals(other.databaseConfiguration)
                 && raftDatabaseConfiguration.equals(other.raftDatabaseConfiguration)
                 && clusterConfiguration.equals(other.clusterConfiguration);
     }
@@ -114,7 +98,6 @@ public class KayVeeConfiguration extends Configuration {
         return Objects.hashCode(
                 getHttpConfiguration().getBindHost(),
                 getHttpConfiguration().getPort(),
-                databaseConfiguration,
                 raftDatabaseConfiguration,
                 clusterConfiguration);
     }
@@ -124,7 +107,6 @@ public class KayVeeConfiguration extends Configuration {
         return Objects.toStringHelper(this)
                 .add("http", getHttpConfiguration())
                 .add("logging", getLoggingConfiguration())
-                .add("databaseConfiguration", databaseConfiguration)
                 .add("raftDatabaseConfiguration", raftDatabaseConfiguration)
                 .add("clusterConfiguration", clusterConfiguration)
                 .toString();

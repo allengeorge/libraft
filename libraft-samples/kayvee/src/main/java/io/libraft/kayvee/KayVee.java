@@ -32,8 +32,6 @@ import com.google.common.collect.Sets;
 import com.yammer.dropwizard.Service;
 import com.yammer.dropwizard.config.Bootstrap;
 import com.yammer.dropwizard.config.Environment;
-import com.yammer.dropwizard.jdbi.DBIFactory;
-import com.yammer.dropwizard.jdbi.bundles.DBIExceptionsBundle;
 import io.libraft.agent.RaftAgent;
 import io.libraft.agent.RaftMember;
 import io.libraft.agent.configuration.RaftClusterConfiguration;
@@ -47,7 +45,6 @@ import io.libraft.kayvee.resources.KeysResource;
 import io.libraft.kayvee.store.DistributedStore;
 import io.libraft.kayvee.store.KayVeeCommand;
 import io.libraft.kayvee.store.LocalStore;
-import org.skife.jdbi.v2.DBI;
 
 import java.net.InetSocketAddress;
 import java.util.Set;
@@ -67,16 +64,12 @@ public class KayVee extends Service<KayVeeConfiguration> {
     @Override
     public void initialize(Bootstrap<KayVeeConfiguration> bootstrap) {
         bootstrap.setName("kayvee");
-        bootstrap.addBundle(new DBIExceptionsBundle());
     }
 
     @Override
     public void run(KayVeeConfiguration configuration, Environment environment) throws Exception {
-        // create the database backend
-        DBIFactory dbiFactory = new DBIFactory();
-        DBI dbi = dbiFactory.build(environment, configuration.getDatabaseConfiguration(), "kayvee");
-        LocalStore localStore = new LocalStore(dbi);
-        localStore.initialize();
+        // create the local store
+        LocalStore localStore = new LocalStore();
 
         // create and setup the distributed store
         RaftConfiguration raftConfiguration = createRaftConfiguration(configuration);

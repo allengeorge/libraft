@@ -4,12 +4,6 @@ http:
   # port on which KayVee listens for admin commands
   adminPort: 6081
 
-database:
-  driverClass: org.sqlite.JDBC
-  url: jdbc:sqlite:kayvee.db
-  user: test
-  password: test
-
 raftDatabase:
   driverClass: org.sqlite.JDBC
   url: jdbc:sqlite:kayvee_raft.db

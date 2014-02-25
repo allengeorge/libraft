@@ -28,273 +28,246 @@
 
 package io.libraft.kayvee.store;
 
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import io.libraft.kayvee.api.KeyValue;
-import org.skife.jdbi.v2.DBI;
-import org.skife.jdbi.v2.Handle;
-import org.skife.jdbi.v2.TransactionCallback;
-import org.skife.jdbi.v2.TransactionStatus;
-import org.skife.jdbi.v2.tweak.HandleCallback;
 
 import javax.annotation.Nullable;
 import java.util.Collection;
+import java.util.Map;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkState;
 
 /**
  * Represents the local server's view of the replicated key-value store.
  * Methods in the class are called to transform the local server's key-value
  * state whenever a {@link KayVeeCommand} is committed to the cluster.
  * <p/>
- * This component is <strong>not</strong> thread-safe.
+ * This state is not persistent, and will have to be refreshed on every
+ * restart. As a result, this component is best thought of as a cache that
+ * contains the applied cluster state to a given point in time.
+ * <p/>
+ * This component is thread-safe.
  */
 public class LocalStore {
 
-    private final class ExceptionReference {
+    private final Map<String, String> entries = Maps.newHashMap();
 
-        private KayVeeException exception = null;
-
-        public KayVeeException getException() {
-            return exception;
-        }
-
-        public void setException(KayVeeException exception) {
-            this.exception = exception;
-        }
-
-        public boolean hasException() {
-            return exception != null;
-        }
-    }
-
-    private final DBI dbi;
-
-    private boolean initialized;
-
-    public LocalStore(DBI dbi) {
-        this.dbi = dbi;
-    }
-
-    // NOTE: avoid early returns, because it may prevent updateLastAppliedCommandIndex() from being called
+    private long lastAppliedCommandIndex = 0;
 
     /**
-     * Initialize this component's internal data structures.
-     * <p/>
-     * This method:
-     * <ul>
-     *     <li>Must be called before any other method.</li>
-     *     <li>Must <strong>not</strong> be called simultaneously by
-     *         multiple threads (the result is undefined).</li>
-     * </ul>
+     * Get the log index of the last applied command.
+     * The index returned will monotonically increase within the
+     * lifetime of the process.
      *
-     * @throws IllegalStateException if this method is called multiple times
+     * @return index >=0 of the last applied command
      */
-    public void initialize() {
-        checkState(!initialized);
-
-        dbi.inTransaction(new TransactionCallback<Void>() {
-            @Override
-            public Void inTransaction(Handle conn, TransactionStatus status) throws Exception {
-                KeyValueDAO keyValueDAO = conn.attach(KeyValueDAO.class);
-                CommandIndexDAO commandIndexDAO = conn.attach(CommandIndexDAO.class);
-
-                // create the tables
-                keyValueDAO.createTable();
-                commandIndexDAO.createTable();
-
-                // populate the kv_last_applied_command_index table with '0' if it has no entries
-                Long lastAppliedCommandIndex = commandIndexDAO.getLastAppliedCommandIndex();
-                if (lastAppliedCommandIndex == null) {
-                    commandIndexDAO.addLastAppliedCommandIndex(0);
-                }
-
-                return null;
-            }
-        });
-
-        initialized = true;
-    }
-
     long getLastAppliedCommandIndex() {
-        return dbi.inTransaction(new TransactionCallback<Long>() {
-            @Override
-            public Long inTransaction(Handle conn, TransactionStatus status) throws Exception {
-                CommandIndexDAO commandIndexDAO = conn.attach(CommandIndexDAO.class);
-                return commandIndexDAO.getLastAppliedCommandIndex();
-            }
-        });
+        return lastAppliedCommandIndex;
     }
 
-    void nop(final long commandIndex) {
-        dbi.withHandle(new HandleCallback<Void>() {
-            @Override
-            public Void withHandle(Handle handle) throws Exception {
-                CommandIndexDAO commandIndexDAO = handle.attach(CommandIndexDAO.class);
-                commandIndexDAO.updateLastAppliedCommandIndex(commandIndex);
-                return null;
-            }
-        });
+    //
+    // IMPORTANT: always update lastAppliedCommandIndex first for the operations below
+    //
+
+    /**
+     * A noop operation. This call does not affect the
+     * key-value state, but does update the last applied command index.
+     *
+     * @param commandIndex log index >= 0 associated with this command
+     */
+    synchronized void nop(final long commandIndex) {
+        updateLastAppliedCommandIndex(commandIndex);
     }
 
-    KeyValue get(final long commandIndex, final String key) throws KayVeeException {
-        checkCommandIndex(commandIndex);
+    /**
+     * Get the value for a key.
+     *
+     * @param commandIndex log index >= 0 associated with this command
+     * @param key non-null (possibly empty) key for which the value should be retrieved
+     * @return a {@code KeyValue} instance containing the most up-to-date {@code key=>value} pair for {@code key}
+     * @throws KayVeeException if {@code key} does not exist
+     */
+    synchronized KeyValue get(final long commandIndex, final String key) throws KayVeeException {
+        updateLastAppliedCommandIndex(commandIndex);
 
-        final ExceptionReference exceptionReference = new ExceptionReference();
+        String value = entries.get(key);
 
-        KeyValue keyValue = dbi.inTransaction(new TransactionCallback<KeyValue>() {
-            @Override
-            public KeyValue inTransaction(Handle conn, TransactionStatus status) throws Exception {
-                KeyValueDAO keyValueDAO = conn.attach(KeyValueDAO.class);
-
-                KeyValue keyValue = keyValueDAO.get(key);
-                updateAppliedCommandIndexInTransaction(conn, commandIndex);
-
-                if (keyValue == null) {
-                    exceptionReference.setException(new KeyNotFoundException(key));
-                    return null;
-                } else {
-                    return keyValue;
-                }
-            }
-        });
-
-        if (exceptionReference.hasException()) {
-            throw exceptionReference.getException();
+        if (value == null) {
+            throw new KeyNotFoundException(key);
         }
 
-        checkState(keyValue != null, "failed to throw KeyNotFoundException for %s (commandIndex:%s)", key, commandIndex);
-        return keyValue;
+        return new KeyValue(key, value);
     }
 
-    Collection<KeyValue> getAll(final long commandIndex) {
-        checkCommandIndex(commandIndex);
+    /**
+     * Get all (key, value) pairs.
+     *
+     * @param commandIndex log index >= 0 associated with this command
+     * @return a <strong>copy</strong> of the most up-to-date {@code key=>value} pairs for all keys
+     */
+    synchronized Collection<KeyValue> getAll(final long commandIndex) {
+        updateLastAppliedCommandIndex(commandIndex);
 
-        return dbi.inTransaction(new TransactionCallback<Collection<KeyValue>>() {
-            @Override
-            public Collection<KeyValue> inTransaction(Handle conn, TransactionStatus status) throws Exception {
-                KeyValueDAO keyValueDAO = conn.attach(KeyValueDAO.class);
-                Collection<KeyValue> all = keyValueDAO.getAll();
-                updateAppliedCommandIndexInTransaction(conn, commandIndex);
-                return all;
-            }
-        });
+        Collection<KeyValue> copiedEntries = Lists.newArrayListWithCapacity(entries.size());
+        for (Map.Entry<String, String> entry : entries.entrySet()) {
+            copiedEntries.add(new KeyValue(entry.getKey(), entry.getValue()));
+        }
+
+        return copiedEntries;
     }
 
-    KeyValue set(final long commandIndex, final String key, final String value) {
-        checkCommandIndex(commandIndex);
+    /**
+     * Set a key to a value.
+     *
+     * @param commandIndex log index >= 0 associated with this command
+     * @param key non-null (possibly empty) key for which the value should be set
+     * @param value non-null, non-empty value for this key
+     * @return a {@code KeyValue} instance containing the most up-to-date {@code key=>value} pair for {@code key}
+     */
+    synchronized KeyValue set(final long commandIndex, final String key, final String value) {
+        updateLastAppliedCommandIndex(commandIndex);
 
-        return dbi.inTransaction(new TransactionCallback<KeyValue>() {
-            @Override
-            public KeyValue inTransaction(Handle conn, TransactionStatus status) throws Exception {
-                KeyValueDAO keyValueDAO = conn.attach(KeyValueDAO.class);
+        entries.put(key, value);
 
-                KeyValue keyValue = keyValueDAO.get(key);
-
-                if (keyValue == null) {
-                    keyValueDAO.add(key, value);
-                } else {
-                    keyValueDAO.update(key, value);
-                }
-
-                updateAppliedCommandIndexInTransaction(conn, commandIndex);
-                return keyValueDAO.get(key);
-            }
-        });
+        return new KeyValue(key, entries.get(key));
     }
 
-    @Nullable KeyValue compareAndSet(final long commandIndex, final String key, @Nullable final String expectedValue, @Nullable final String newValue) throws KayVeeException {
-        checkCommandIndex(commandIndex);
-
+    /**
+     * Do a compare-and-set (CAS), aka. test-and-set, operation for key.
+     *
+     * @param commandIndex log index >= 0 associated with this command
+     * @param key non-null (possibly empty) key for which the value should be set
+     * @param expectedValue existing value associated with {@code key}.
+     *                      If {@code expectedValue} is null {@code LocalStore} <strong>should not</strong>
+     *                      contain a {@code key=>value} pair for {@code key}
+     * @param newValue new value to be associated with {@code key}.
+     *                 If {@code newValue} is null the existing {@code key=>value} pair is deleted
+     * @return a {@code KeyValue} instance containing the most up-to-date {@code key=>value} pair for {@code key},
+     * or {@code null} if this operation removed the {@code key=>value} pair
+     * @throws KeyNotFoundException if {@code key} does not exist
+     * @throws ValueMismatchException if {@code expectedValue} does not match the <strong>current</strong> value for {@code key}
+     * @throws KeyAlreadyExistsException if {@code expectedValue} is null (indicating that
+     * a new key-value mapping should be created), but a {@code key=>value} pair already exists
+     */
+    synchronized @Nullable KeyValue compareAndSet(
+            final long commandIndex,
+            final String key,
+            final @Nullable String expectedValue,
+            final @Nullable String newValue)
+            throws KeyNotFoundException, ValueMismatchException, KeyAlreadyExistsException {
         if (expectedValue == null && newValue == null) {
-            // TODO (AG): while I _could_ update the lastAppliedCommandIndex here, calling code should never call us with these arguments
-            throw new IllegalArgumentException(
-                    String.format("both expectedValue and newValue null for %s (commandIndex:%s)", key, commandIndex));
+            // while I _could_ update the lastAppliedCommandIndex here, calling code should never call us with these arguments
+            throw new IllegalArgumentException(String.format("both expectedValue and newValue null for %s (commandIndex:%s)", key, commandIndex));
         }
 
-        final ExceptionReference exceptionReference = new ExceptionReference();
+        updateLastAppliedCommandIndex(commandIndex);
 
-        KeyValue keyValue = dbi.inTransaction(new TransactionCallback<KeyValue>() {
-            @Override
-            public KeyValue inTransaction(Handle conn, TransactionStatus status) throws Exception {
-                KeyValueDAO keyValueDAO = conn.attach(KeyValueDAO.class);
+        String existingValue = entries.get(key);
 
-                KeyValue existingKeyValue = keyValueDAO.get(key);
-                String existingValue = existingKeyValue == null ? null : existingKeyValue.getValue();
+        // all possibilities
+        // -------------------------------------------------------------------
+        // | existingValue | expectedValue |    result
+        // |     null      |     null      |    assert newValue != null; create key=>newValue
+        // |     null      |     !null     |    KeyNotFoundException
+        // |     !null     |     null      |    KeyAlreadyExistsException
+        // |     !null     |     !null     |    expectedValue != existingValue ? ValueMismatchException : ( newValue != null ? update key=>newValue : delete key)
+        //
+        // existingValue != null && expectedValue != null (from last row above)
+        // --------------------------------------------------------------------
+        // |     match     | result
+        // |       Y       | newValue != null ? update key=>newValue : delete key)
+        // |       N       | ValueMismatchException
 
-                // all possibilities
-                // -------------------------------------------------------------------
-                // | existingValue | expectedValue |    result
-                // |     null      |     null      |    assert newValue != null; create key=>newValue
-                // |     null      |     !null     |    KeyNotFoundException
-                // |     !null     |     null      |    KeyAlreadyExistsException
-                // |     !null     |     !null     |    expectedValue != existingValue ? ValueMismatchException : ( newValue != null ? update key=>newValue : delete key)
-                //
-                // existingValue != null && expectedValue != null (from last row above)
-                // --------------------------------------------------------------------
-                // |     match     | result
-                // |       Y       | newValue != null ? update key=>newValue : delete key)
-                // |       N       | ValueMismatchException
-
-                if (existingValue == null) {
-                    if (expectedValue == null) {
-                        keyValueDAO.add(key, newValue);
-                    } else {
-                        exceptionReference.setException(new KeyNotFoundException(key));
-                    }
-                } else {
-                    if (expectedValue != null) {
-                        if (existingValue.equals(expectedValue)) {
-                            if (newValue != null) {
-                                keyValueDAO.update(key, newValue);
-                            } else {
-                                keyValueDAO.delete(key);
-                            }
-                        } else {
-                            exceptionReference.setException(new ValueMismatchException(key, expectedValue, existingValue));
-                        }
-                    } else {
-                        exceptionReference.setException(new KeyAlreadyExistsException(key));
-                    }
-                }
-
-                updateAppliedCommandIndexInTransaction(conn, commandIndex);
-
-                if (exceptionReference.hasException()) {
-                    return null;
-                } else {
-                    return keyValueDAO.get(key);
-                }
+        if (existingValue == null) {
+            if (expectedValue == null) {
+                entries.put(key, newValue);
+            } else {
+                throw new KeyNotFoundException(key);
             }
-        });
-
-        if (exceptionReference.hasException()) {
-            throw exceptionReference.getException();
+        } else {
+            if (expectedValue != null) {
+                if (existingValue.equals(expectedValue)) {
+                    if (newValue != null) {
+                        entries.put(key, newValue);
+                    } else {
+                        entries.remove(key);
+                    }
+                } else {
+                    throw new ValueMismatchException(key, expectedValue, existingValue);
+                }
+            } else {
+                throw new KeyAlreadyExistsException(key);
+            }
         }
 
-        return keyValue;
+        // TODO (AG): I could just look at newValue, but for now I'll look at the map again
+        String finalValue = entries.get(key);
+        return finalValue != null ? new KeyValue(key, finalValue) : null;
     }
 
-    void delete(final long commandIndex, final String key) {
-        checkCommandIndex(commandIndex);
+    /**
+     * Delete the value for a key. This operation is a noop if the key does not exist.
+     *
+     * @param commandIndex log index >= 0 associated with this command
+     * @param key non-null (possibly empty) key for which the value should be deleted
+     */
+    synchronized void delete(final long commandIndex, final String key) {
+        updateLastAppliedCommandIndex(commandIndex);
 
-        dbi.inTransaction(new TransactionCallback<Void>() {
-            @Override
-            public Void inTransaction(Handle conn, TransactionStatus status) throws Exception {
-                KeyValueDAO keyValueDAO = conn.attach(KeyValueDAO.class);
-                updateAppliedCommandIndexInTransaction(conn, commandIndex);
-                keyValueDAO.delete(key);
-                return null;
-            }
-        });
+        entries.remove(key);
     }
 
-    private static void checkCommandIndex(long commandIndex) {
+    private void updateLastAppliedCommandIndex(long commandIndex) {
         checkArgument(commandIndex > 0, "commandIndex must be positive: given:%s", commandIndex);
+        checkArgument(commandIndex > lastAppliedCommandIndex, "commandIndex must be monotonic: given:%s", commandIndex);
+
+        lastAppliedCommandIndex = commandIndex;
     }
 
-    private void updateAppliedCommandIndexInTransaction(Handle conn, long commandIndex) {
-        checkArgument(commandIndex > 0, "commandIndex must be positive given:%s", commandIndex); // TODO (AG): should I check this here, or at every public entry point?
-        CommandIndexDAO commandIndexDAO = conn.attach(CommandIndexDAO.class);
-        commandIndexDAO.updateLastAppliedCommandIndex(commandIndex);
+    //
+    // the following commands are to be used within unit tests only
+    // they set the underlying state, do not update lastAppliedCommandIndex and do not perform any verification
+    //
+
+    /**
+     * Set the log index associated with the last command {@code LocalStore} applied.
+     * <p/>
+     * <strong>This method is package-private for testing
+     * reasons only!</strong> It should <strong>never</strong>
+     * be called in a non-test context!
+     *
+     * @param commandIndex log index >= 0 for the last command applied
+     */
+    void setLastAppliedCommandIndexForUnitTestsOnly(long commandIndex) {
+        updateLastAppliedCommandIndex(commandIndex);
+    }
+
+    /**
+     * Set the value for a key.
+     * <p/>
+     * <strong>This method is package-private for testing
+     * reasons only!</strong> It should <strong>never</strong>
+     * be called in a non-test context!
+     *
+     * @param key non-null (possibly empty) key for which the value should be set
+     * @param value non-null, non-empty value for this key
+     */
+    void setKeyValueForUnitTestsOnly(String key, String value) {
+        entries.put(key, value);
+    }
+
+    /**
+     * Get the value for a key.
+     * <p/>
+     * <strong>This method is package-private for testing
+     * reasons only!</strong> It should <strong>never</strong>
+     * be called in a non-test context!
+     *
+     * @param key non-null (possibly empty) key for which the value should be retrieved
+     * @return current value associated with this key, or null if the key does not exist
+     */
+    @Nullable String getKeyValueForUnitTestsOnly(String key) {
+        return entries.get(key);
     }
 }
