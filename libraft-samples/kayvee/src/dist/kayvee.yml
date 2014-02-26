@@ -3,12 +3,26 @@ http:
   port: 6080
   # port on which KayVee listens for admin commands
   adminPort: 6081
-
-database:
-  driverClass: org.sqlite.JDBC
-  url: jdbc:sqlite:kayvee.db
-  user: test
-  password: test
+  # maximum number of request-processing threads
+  maxThreads: 5
+  # minimum number of request-processing threads
+  minThreads: 5
+  # threads devoted to accepting incoming connections
+  acceptorThreads: 1
+  # number of unaccepted connections to hold after which incoming connections are rejected
+  acceptQueueSize: 100
+  # request logging
+  requestLog:
+    console:
+      enabled: false
+    file:
+      enabled: true
+      currentLogFilename: kayvee-requests.log
+      archivedLogFilenamePattern: kayvee-requests-%d.log.gz
+      archivedFileCount: 3
+  # compression
+  gzip:
+    enabled: false
 
 raftDatabase:
   driverClass: org.sqlite.JDBC

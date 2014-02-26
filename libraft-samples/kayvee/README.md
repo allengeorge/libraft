@@ -81,14 +81,6 @@ http:
   # port on which KayVee listens for admin commands
   adminPort: 6081
 
-# database in which KayVee key-values are stored
-database:
-  driverClass: org.sqlite.JDBC
-  url: jdbc:sqlite:kayvee.db
-  user: test
-  # password may be empty or omitted
-  password: test
-
 # raft-agent Log and Store database
 raftDatabase:
   driverClass: org.sqlite.JDBC

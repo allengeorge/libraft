@@ -3,12 +3,6 @@ http:
   port: 8080
   adminPort: 8081
 
-database:
-  driverClass: org.h2.Driver
-  url: jdbc:h2:mem:test_kayvee
-  user: test
-  password: test
-
 raftDatabase:
   driverClass: org.h2.Driver
   url: jdbc:h2:mem:test_raft # FIXME (AG): can't end with semicolon

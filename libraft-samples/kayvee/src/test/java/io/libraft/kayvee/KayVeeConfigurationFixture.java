@@ -30,7 +30,6 @@ package io.libraft.kayvee;
 
 import com.google.common.collect.ImmutableSet;
 import com.yammer.dropwizard.config.HttpConfiguration;
-import com.yammer.dropwizard.db.DatabaseConfiguration;
 import io.libraft.agent.configuration.RaftDatabaseConfiguration;
 import io.libraft.kayvee.configuration.ClusterConfiguration;
 import io.libraft.kayvee.configuration.ClusterMember;
@@ -46,14 +45,6 @@ public abstract class KayVeeConfigurationFixture {
         KAYVEE_HTTP_CONFIGURATION.setBindHost("localhost");
         KAYVEE_HTTP_CONFIGURATION.setPort(8080);
         KAYVEE_HTTP_CONFIGURATION.setAdminPort(8081);
-    }
-
-    private static final DatabaseConfiguration KAYVEE_DATABASE_CONFIGURATION = new DatabaseConfiguration();
-    static {
-        KAYVEE_DATABASE_CONFIGURATION.setDriverClass("org.h2.Driver");
-        KAYVEE_DATABASE_CONFIGURATION.setUrl("jdbc:h2:mem:test_kayvee");
-        KAYVEE_DATABASE_CONFIGURATION.setUser("test");
-        KAYVEE_DATABASE_CONFIGURATION.setPassword("test");
     }
 
     private static final RaftDatabaseConfiguration RAFT_DATABASE_CONFIGURATION = new RaftDatabaseConfiguration(
@@ -75,7 +66,6 @@ public abstract class KayVeeConfigurationFixture {
     public static final KayVeeConfiguration KAYVEE_CONFIGURATION = new KayVeeConfiguration();
     static {
         KAYVEE_CONFIGURATION.setHttpConfiguration(KAYVEE_HTTP_CONFIGURATION);
-        KAYVEE_CONFIGURATION.setDatabaseConfiguration(KAYVEE_DATABASE_CONFIGURATION);
         KAYVEE_CONFIGURATION.setRaftDatabaseConfiguration(RAFT_DATABASE_CONFIGURATION);
         KAYVEE_CONFIGURATION.setClusterConfiguration(KAYVEE_CLUSTER_CONFIGURATION);
     }

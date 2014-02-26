@@ -30,12 +30,8 @@ description 'Sample consistent, distributed key-value store that uses libraft-ag
 
 dependencies {
     compile 'com.yammer.dropwizard:dropwizard-core:0.6.2'
-    compile 'com.yammer.dropwizard:dropwizard-jdbi:0.6.2'
-    compile 'com.yammer.dropwizard:dropwizard-db:0.6.2'
     compile project(':libraft-agent')
 
-    // FIXME (AG): this dependency on h2 exists because xerial-3.7.2 does not support ?shared=... in the uri
-    testRuntime 'com.h2database:h2:1.3.173'
     testCompile 'com.yammer.dropwizard:dropwizard-testing:0.6.2'
     testCompile 'com.yammer.dropwizard:dropwizard-client:0.6.2'
 

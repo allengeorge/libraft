@@ -34,6 +34,8 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import com.yammer.dropwizard.lifecycle.Managed;
+import com.yammer.metrics.Metrics;
+import com.yammer.metrics.core.Histogram;
 import io.libraft.Command;
 import io.libraft.CommittedCommand;
 import io.libraft.NotLeaderException;
@@ -66,8 +68,29 @@ import static com.google.common.base.Preconditions.checkState;
 public class DistributedStore implements Managed, RaftListener {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DistributedStore.class);
+    private static final Histogram SUBMIT_COMMAND_HISTOGRAM = Metrics.newHistogram(DistributedStore.class, "submit-command");
+    private static final Histogram APPLY_COMMAND_HISTOGRAM = Metrics.newHistogram(DistributedStore.class, "apply-command");
 
-    private final ConcurrentMap<Long, SettableFuture<?>> pendingCommands = Maps.newConcurrentMap();
+    private class PendingCommandData {
+
+        private final SettableFuture<?> commandFuture;
+        private final long startTime;
+
+        private PendingCommandData(SettableFuture<?> commandFuture) {
+            this.commandFuture = commandFuture;
+            this.startTime = System.currentTimeMillis();
+        }
+
+        public SettableFuture<?> getCommandFuture() {
+            return commandFuture;
+        }
+
+        public long getStartTime() {
+            return startTime;
+        }
+    }
+
+    private final ConcurrentMap<Long, PendingCommandData> pendingCommands = Maps.newConcurrentMap();
     private final Random random = new Random();
     private final LocalStore localStore;
 
@@ -158,11 +181,23 @@ public class DistributedStore implements Managed, RaftListener {
     }
 
     private void applyCommandInternal(long index, KayVeeCommand kayVeeCommand) {
-        SettableFuture<?> removed = pendingCommands.remove(kayVeeCommand.getCommandId());
-        if (removed == null) {
+        SettableFuture<?> removed;
+
+        // check if this command has not failed already
+        PendingCommandData pendingCommandData = pendingCommands.remove(kayVeeCommand.getCommandId());
+        if (pendingCommandData != null) {
+            removed = pendingCommandData.getCommandFuture();
+        } else {
             removed = SettableFuture.create(); // create a fake future just to avoid if (removed ...)
         }
 
+        // metrics
+        long applyCommandInternalStartTime = System.currentTimeMillis();
+        if (pendingCommandData != null) {
+            SUBMIT_COMMAND_HISTOGRAM.update(applyCommandInternalStartTime - pendingCommandData.getStartTime());
+        }
+
+        // actually apply the command
         try {
             LOGGER.info("apply {} at index {}", kayVeeCommand, index);
 
@@ -194,6 +229,10 @@ public class DistributedStore implements Managed, RaftListener {
             }
         } catch (Exception e) {
             removed.setException(e);
+        } finally {
+            if (pendingCommandData != null) {
+                APPLY_COMMAND_HISTOGRAM.update(System.currentTimeMillis() - applyCommandInternalStartTime);
+            }
         }
     }
 
@@ -288,7 +327,7 @@ public class DistributedStore implements Managed, RaftListener {
         final SettableFuture<T> returned = SettableFuture.create();
 
         try {
-            SettableFuture<?> previous = pendingCommands.put(kayVeeCommand.getCommandId(), returned);
+            PendingCommandData previous = pendingCommands.put(kayVeeCommand.getCommandId(), new PendingCommandData(returned));
             checkState(previous == null, "existing command:%s", previous);
 
             Futures.addCallback(returned, new FutureCallback<Object>() {

@@ -304,7 +304,10 @@ public final class RaftNetworkClient implements RPCSender {
             public void operationComplete(ChannelFuture future) throws Exception {
                 LOGGER.debug("{}: channel closed to {}", selfId, serverId);
 
-                server.setChannel(null);
+                boolean swapped = server.compareAndSetChannel(future.getChannel(), null); // Hmm...previous should work
+                if (!swapped) {
+                    LOGGER.warn("{}: channel replaced to {}", selfId, serverId);
+                }
 
                 if (!running) {
                     logNotRunning();
@@ -369,7 +372,7 @@ public final class RaftNetworkClient implements RPCSender {
                 LOGGER.trace("{}: attempt set channel for {} to {}", selfId, server, channel.getId());
 
                 boolean channelSet = server.compareAndSetChannel(null, channel);
-                checkState(channelSet, "%s: fail set channel for %s", selfId, serverId);
+                checkState(channelSet, "%s: fail set channel for %s", selfId, serverId); // FIXME (AG): now this will probably break!
             }
         });
     }

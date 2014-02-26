@@ -69,14 +69,14 @@ public final class KeysResource {
 
     @Path("/{key:" + KEY_PATTERN + "}")
     public KeyResource forKey(@PathParam("key") String key) {
-        LOGGER.info("locate sub-resource:{}", key);
+        LOGGER.trace("locate sub-resource:{}", key);
         return new KeyResource(key, members, distributedStore);
     }
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     public Collection<KeyValue> getAll() throws Exception {
-        LOGGER.info("get all keys");
+        LOGGER.trace("get all keys");
 
         try {
             ListenableFuture<Collection<KeyValue>> getAllFuture = distributedStore.getAll();
