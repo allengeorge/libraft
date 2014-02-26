@@ -4,11 +4,16 @@ http:
   maxThreads: 5
   minThreads: 2
   acceptorThreads: 1
-
-database:
-  driverClass: org.sqlite.JDBC
-  url: jdbc:sqlite:s00-kayvee.db
-  user: test
+  requestLog:
+    console:
+      enabled: false
+    file:
+      enabled: true
+      currentLogFilename: s00-kayvee-requests.log
+      archivedLogFilenamePattern: s00-kayvee-requests-%d.log.gz
+      archivedFileCount: 3
+  gzip:
+    enabled: false
 
 raftDatabase:
   driverClass: org.sqlite.JDBC
@@ -17,7 +22,6 @@ raftDatabase:
 
 cluster:
   self: SERVER_00
-
   members:
     - id: SERVER_00
       kayVeeUrl: http://localhost:6080
@@ -31,10 +35,8 @@ cluster:
 
 logging:
   level: debug
-
   console:
-    enabled: true
-
+    enabled: false
   file:
     enabled: true
     currentLogFilename: s00-kayvee.log
