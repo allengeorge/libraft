@@ -49,6 +49,8 @@ import java.util.Random;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static io.libraft.algorithm.StoringSender.AppendEntriesReply;
+import static io.libraft.algorithm.UnitTestLogEntries.NOOP;
+import static io.libraft.algorithm.UnitTestLogEntries.SENTINEL;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
@@ -100,7 +102,7 @@ public final class AppendEntriesReplyRandomizedInputTest {
             NOOP(11, 5),
             NOOP(12, 5),
             NOOP(13, 5),
-            NOOP(14, 6), // <--- FIRST ENTRY OF CURRENT_TERM
+            NOOP(14, 6), // <--- FIRST COMMAND OF CURRENT_TERM
             NOOP(15, 6),
             NOOP(16, 6),
             NOOP(17, 6),
@@ -116,15 +118,6 @@ public final class AppendEntriesReplyRandomizedInputTest {
     };
 
     private final int LAST_LOG_INDEX = FULL_LOG.length - 1;
-
-    @SuppressWarnings("SameReturnValue")
-    private static LogEntry SENTINEL() {
-        return LogEntry.SENTINEL;
-    }
-
-    private static LogEntry.NoopEntry NOOP(long index, long term) {
-        return new LogEntry.NoopEntry(index, term);
-    }
 
     @Parameterized.Parameters
     public static java.util.Collection<Object[]> generateRandomSeeds() {
@@ -147,6 +140,7 @@ public final class AppendEntriesReplyRandomizedInputTest {
     private final StoringSender sender;
     private final Store store;
     private final Log log;
+    private final SnapshotsStore snapshotsStore;
     private final RaftListener listener;
 
     private RaftAlgorithm algorithm;
@@ -173,6 +167,7 @@ public final class AppendEntriesReplyRandomizedInputTest {
         sender = new StoringSender();
         store = new InMemoryStore();
         log = new InMemoryLog();
+        snapshotsStore = mock(SnapshotsStore.class);
         listener = mock(RaftListener.class);
     }
 
@@ -192,7 +187,7 @@ public final class AppendEntriesReplyRandomizedInputTest {
         }
 
         // create and start the algorithm instance
-        algorithm = new RaftAlgorithm(raftAlgorithmRandom, timer, sender, store, log, listener, SELF, ImmutableSet.copyOf(CLUSTER));
+        algorithm = new RaftAlgorithm(raftAlgorithmRandom, timer, sender, store, log, snapshotsStore, listener, SELF, ImmutableSet.copyOf(CLUSTER));
         algorithm.initialize();
         algorithm.start();
 

@@ -30,7 +30,7 @@ package io.libraft.algorithm;
 
 /**
  * Wraps implementation-specific exceptions thrown by a
- * {@link Store} or {@link Log}.
+ * {@link Store}, {@link Log} or {@link SnapshotsStore}.
  * <p/>
  * This exception is considered <strong>unrecoverable</strong>.
  * A component <strong>must</strong> terminate after catching
@@ -38,6 +38,8 @@ package io.libraft.algorithm;
  */
 @SuppressWarnings("unused")
 public final class StorageException extends Exception {
+
+    private static final long serialVersionUID = -6166627963748985826L;
 
     private StorageException() {}
 

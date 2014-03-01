@@ -274,7 +274,7 @@ public class MyRaftListener implements RaftListener {
     }
 
     @Override
-    public void applyCommand(long index, Command command) {
+    public void applyCommitted(long index, Command command) {
         //...
     }
 }

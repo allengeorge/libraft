@@ -20,6 +20,10 @@ raftDatabase:
   url: jdbc:sqlite:s02-raft.db
   user: test
 
+snapshots:
+  minEntriesToSnapshot: 5
+  snapshotCheckInterval: 1000
+
 cluster:
   self: SERVER_02
   members:

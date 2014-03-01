@@ -9,6 +9,11 @@ raftDatabase:
   user: test
   password: test
 
+snapshots:
+  minEntriesToSnapshot: 1000
+  snapshotCheckInterval: 43200000
+  snapshotsDirectory: snapshots
+
 cluster:
   self: SERVER_00
 

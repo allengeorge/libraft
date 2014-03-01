@@ -31,6 +31,7 @@ package io.libraft.kayvee;
 import com.google.common.collect.ImmutableSet;
 import com.yammer.dropwizard.config.HttpConfiguration;
 import io.libraft.agent.configuration.RaftDatabaseConfiguration;
+import io.libraft.agent.configuration.RaftSnapshotsConfiguration;
 import io.libraft.kayvee.configuration.ClusterConfiguration;
 import io.libraft.kayvee.configuration.ClusterMember;
 import io.libraft.kayvee.configuration.KayVeeConfiguration;
@@ -40,11 +41,11 @@ public abstract class KayVeeConfigurationFixture {
     private KayVeeConfigurationFixture() { // to prevent instantiation
     }
 
-    private static final HttpConfiguration KAYVEE_HTTP_CONFIGURATION = new HttpConfiguration();
+    private static final HttpConfiguration HTTP_CONFIGURATION = new HttpConfiguration();
     static {
-        KAYVEE_HTTP_CONFIGURATION.setBindHost("localhost");
-        KAYVEE_HTTP_CONFIGURATION.setPort(8080);
-        KAYVEE_HTTP_CONFIGURATION.setAdminPort(8081);
+        HTTP_CONFIGURATION.setBindHost("localhost");
+        HTTP_CONFIGURATION.setPort(8080);
+        HTTP_CONFIGURATION.setAdminPort(8081);
     }
 
     private static final RaftDatabaseConfiguration RAFT_DATABASE_CONFIGURATION = new RaftDatabaseConfiguration(
@@ -54,7 +55,7 @@ public abstract class KayVeeConfigurationFixture {
             "test"
     );
 
-    private static final ClusterConfiguration KAYVEE_CLUSTER_CONFIGURATION = new ClusterConfiguration(
+    private static final ClusterConfiguration CLUSTER_CONFIGURATION = new ClusterConfiguration(
             "SERVER_00",
             ImmutableSet.of(
                     new ClusterMember("SERVER_00", "http://localhost:8080", "localhost:9080"),
@@ -63,10 +64,18 @@ public abstract class KayVeeConfigurationFixture {
             )
     );
 
+    private static final RaftSnapshotsConfiguration SNAPSHOTS_CONFIGURATION = new RaftSnapshotsConfiguration();
+    static {
+        SNAPSHOTS_CONFIGURATION.setMinEntriesToSnapshot(1000);
+        SNAPSHOTS_CONFIGURATION.setSnapshotCheckInterval(12 * 60 * 60 * 1000);
+        SNAPSHOTS_CONFIGURATION.setSnapshotsDirectory("snapshots");
+    }
+
     public static final KayVeeConfiguration KAYVEE_CONFIGURATION = new KayVeeConfiguration();
     static {
-        KAYVEE_CONFIGURATION.setHttpConfiguration(KAYVEE_HTTP_CONFIGURATION);
+        KAYVEE_CONFIGURATION.setHttpConfiguration(HTTP_CONFIGURATION);
         KAYVEE_CONFIGURATION.setRaftDatabaseConfiguration(RAFT_DATABASE_CONFIGURATION);
-        KAYVEE_CONFIGURATION.setClusterConfiguration(KAYVEE_CLUSTER_CONFIGURATION);
+        KAYVEE_CONFIGURATION.setSnapshotsConfiguration(SNAPSHOTS_CONFIGURATION);
+        KAYVEE_CONFIGURATION.setClusterConfiguration(CLUSTER_CONFIGURATION);
     }
 }

@@ -92,7 +92,7 @@ public interface Store {
      *                 Raft server itself (if it were a candidate and voted for itself),
      *                 or {@code null} if it did not vote
      */
-    void setVotedFor(long term, String server) throws StorageException;
+    void setVotedFor(long term, @Nullable String server) throws StorageException;
 
     /**
      * Remove <strong>all</strong> (election term, server voted for)

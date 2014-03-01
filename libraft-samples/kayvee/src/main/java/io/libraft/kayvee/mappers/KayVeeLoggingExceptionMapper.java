@@ -33,11 +33,31 @@ abstract class KayVeeLoggingExceptionMapper<ExceptionType extends Exception> imp
 
     private final UnbrandedErrorHandler errorHandler = new UnbrandedErrorHandler();
 
+    /**
+     * Request being processed that generated the exception.
+     */
     @Context
     protected HttpServletRequest request;
 
+    /**
+     * Constructor.
+     */
     protected KayVeeLoggingExceptionMapper() { }
 
+    /**
+     * Generate an HTTP error response.
+     * <p/>
+     * This response includes:
+     * <ul>
+     *     <li>A unique id for this exception event.</li>
+     *     <li>The response code (specified by subclasses).</li>
+     *     <li>The exception stack trace.</li>
+     * </ul>
+     *
+     * @param exception exception instance thrown while processing {@link KayVeeLoggingExceptionMapper#request}
+     * @param status HTTP status code of the response (ex. 400, 404, etc.)
+     * @return a valid {@code Response} instance with a fully-populated error message and HTTP response code set that can be sent to the client
+     */
     protected final Response newResponse(ExceptionType exception, Response.Status status) {
         final StringWriter writer = new StringWriter(4096);
         try {

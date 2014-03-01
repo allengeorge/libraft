@@ -41,13 +41,20 @@ import javax.annotation.Nullable;
  */
 public final class ValueMismatchException extends KayVeeException {
 
+    private static final long serialVersionUID = -8419273931405391504L;
+
     private final String key;
 
-    @Nullable
-    private final String expectedValue;
-    @Nullable
-    private final String existingValue;
+    @Nullable private final String expectedValue;
+    @Nullable private final String existingValue;
 
+    /**
+     * Constructor.
+     *
+     * @param key non-null, non-empty key for which the CAS operation failed
+     * @param expectedValue expected value (may be null) the caller specified for the CAS operation on the key
+     * @param existingValue current value for the key, or null if the key does not exist
+     */
     public ValueMismatchException(String key, @Nullable String expectedValue, @Nullable String existingValue) {
         super(String.format("key:%s - mismatched value: expected:%s existing:%s", key, expectedValue, existingValue));
         this.key = key;
@@ -55,17 +62,30 @@ public final class ValueMismatchException extends KayVeeException {
         this.existingValue = existingValue;
     }
 
+    /**
+     * Get the key for which the CAS operation failed.
+     *
+     * @return non-null, non-empty key for which the CAS operation failed
+     */
     public String getKey() {
         return key;
     }
 
-    @Nullable
-    public String getExpectedValue() {
+    /**
+     * Get the expected value the caller specified for the CAS operation on the key.
+     *
+     * @return expected value (may be null) the caller specified for the CAS operation on the key
+     */
+    public @Nullable String getExpectedValue() {
         return expectedValue;
     }
 
-    @Nullable
-    public String getExistingValue() {
+    /**
+     * Get the current value for the key.
+     *
+     * @return current value for the key, or null if the key does not exist
+     */
+    public @Nullable String getExistingValue() {
         return existingValue;
     }
 }

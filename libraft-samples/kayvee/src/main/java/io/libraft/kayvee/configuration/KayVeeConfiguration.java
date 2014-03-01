@@ -32,7 +32,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Objects;
 import com.yammer.dropwizard.config.Configuration;
 import io.libraft.agent.configuration.RaftDatabaseConfiguration;
+import io.libraft.agent.configuration.RaftSnapshotsConfiguration;
 
+import javax.annotation.Nullable;
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
 
@@ -41,47 +43,102 @@ import javax.validation.constraints.NotNull;
 // contain all the standard Dropwizard configuration stanzas
 /**
  * Defines the root KayVee configuration. Contains
- * 2 extra blocks on top of the standard blocks and properties supplied
+ * three extra blocks on top of the standard blocks and properties supplied
  * by Dropwizard:
  * <ul>
- *     <li>raftDatabase</li>
- *     <li>cluster</li>
+ *     <li>raftDatabase: configuration properties for the database
+ *         in which all Raft metadata and log entries are persisted.</li>
+ *     <li>snapshots: configuration properties for KayVee
+ *         {@code key=>value} state snapshots.</li>
+ *     <li>cluster: KayVee cluster configuration properties.</li>
  * </ul>
  * See the KayVee README.md for more on the KayVee configuration.
  */
-public class KayVeeConfiguration extends Configuration {
+public final class KayVeeConfiguration extends Configuration {
+
+    private static final String HTTP = "http";
+    private static final String LOGGING = "logging";
+    private static final String RAFT_DATABASE = "raftDatabase";
+    private static final String SNAPSHOTS = "snapshots";
+    private static final String CLUSTER = "cluster";
 
     @Valid
     @NotNull
-    @JsonProperty("raftDatabase")
+    @JsonProperty(RAFT_DATABASE)
     private RaftDatabaseConfiguration raftDatabaseConfiguration;
 
     @Valid
     @NotNull
-    @JsonProperty("cluster")
+    @JsonProperty(SNAPSHOTS)
+    private RaftSnapshotsConfiguration snapshotsConfiguration = new RaftSnapshotsConfiguration(); // disable snapshots unless overridden
+
+    @Valid
+    @NotNull
+    @JsonProperty(CLUSTER)
     private ClusterConfiguration clusterConfiguration;
 
+    /**
+     * Get the Raft log/metadata database configuration block.
+     *
+     * @return instance of {@code RaftDatabaseConfiguration} in which
+     * Raft log/metadata properties are stored
+     */
     public RaftDatabaseConfiguration getRaftDatabaseConfiguration() {
         return raftDatabaseConfiguration;
     }
 
-    @SuppressWarnings("unused")
+    /**
+     * Set the Raft log/metadata database configuration block.
+     *
+     * @param raftDatabaseConfiguration instance of {@code RaftDatabaseConfiguration}
+     *                                  in which Raft log/metadata properties are stored
+     */
     public void setRaftDatabaseConfiguration(RaftDatabaseConfiguration raftDatabaseConfiguration) {
         this.raftDatabaseConfiguration = raftDatabaseConfiguration;
     }
 
+    /**
+     * Get the KayVee snapshot configuration block.
+     *
+     * @return instance of {@code RaftSnapshotsConfiguration} in which
+     * the snapshot properties are stored
+     */
+    public RaftSnapshotsConfiguration getSnapshotsConfiguration() {
+        return snapshotsConfiguration;
+    }
+
+    /**
+     * Set the kayVee snapshot configuration block.
+     *
+     * @param snapshotsConfiguration instance of {@code RaftSnapshotsConfiguration} in which
+     *                               the snapshot properties are stored
+     */
+    public void setSnapshotsConfiguration(RaftSnapshotsConfiguration snapshotsConfiguration) {
+        this.snapshotsConfiguration = snapshotsConfiguration;
+    }
+
+    /**
+     * Get the KayVee cluster configuration block.
+     *
+     * @return instance of {@code ClusterConfiguration} in which the
+     * KayVee cluster configuration properties are stored
+     */
     public ClusterConfiguration getClusterConfiguration() {
         return clusterConfiguration;
     }
 
-    @SuppressWarnings("unused")
+    /**
+     * Set the KayVee cluster configuration block.
+     *
+     * @param clusterConfiguration instance of {@code ClusterConfiguration} in
+     *                             which the KayVee cluster configuration properties are stored
+     */
     public void setClusterConfiguration(ClusterConfiguration clusterConfiguration) {
         this.clusterConfiguration = clusterConfiguration;
     }
 
-
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(@Nullable Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
 
@@ -90,6 +147,7 @@ public class KayVeeConfiguration extends Configuration {
         return getHttpConfiguration().getBindHost().equals(other.getHttpConfiguration().getBindHost())
                 && getHttpConfiguration().getPort() == other.getHttpConfiguration().getPort()
                 && raftDatabaseConfiguration.equals(other.raftDatabaseConfiguration)
+                && snapshotsConfiguration.equals(other.snapshotsConfiguration)
                 && clusterConfiguration.equals(other.clusterConfiguration);
     }
 
@@ -99,16 +157,19 @@ public class KayVeeConfiguration extends Configuration {
                 getHttpConfiguration().getBindHost(),
                 getHttpConfiguration().getPort(),
                 raftDatabaseConfiguration,
+                snapshotsConfiguration,
                 clusterConfiguration);
     }
 
     @Override
     public String toString() {
-        return Objects.toStringHelper(this)
-                .add("http", getHttpConfiguration())
-                .add("logging", getLoggingConfiguration())
-                .add("raftDatabaseConfiguration", raftDatabaseConfiguration)
-                .add("clusterConfiguration", clusterConfiguration)
+        return Objects
+                .toStringHelper(this)
+                .add(HTTP, getHttpConfiguration())
+                .add(LOGGING, getLoggingConfiguration())
+                .add(RAFT_DATABASE, raftDatabaseConfiguration)
+                .add(SNAPSHOTS, snapshotsConfiguration)
+                .add(CLUSTER, clusterConfiguration)
                 .toString();
     }
 }

@@ -35,27 +35,33 @@ import com.google.common.net.HostAndPort;
 import io.libraft.agent.configuration.Endpoints;
 import org.hibernate.validator.constraints.NotEmpty;
 
+import javax.annotation.Nullable;
 import javax.validation.constraints.Max;
 import javax.validation.constraints.Min;
-import javax.validation.constraints.NotNull;
 import java.net.MalformedURLException;
 import java.net.URL;
 
 /**
  * Defines a KayVee server. Contains the following properties:
  * <ul>
- *     <li>id</li>
- *     <li>kayVeeUrl</li>
- *     <li>raftEndpoint</li>
+ *     <li>id: unique id of the KayVee server (this id is used as this server's id in the Raft cluster).</li>
+ *     <li>kayVeeUrl: HTTP endpoint to which KayVee REST API calls should be made.</li>
+ *     <li>raftEndpoint: URL of the local server in host:port format to which Raft protocol messages can be sent.</li>
  * </ul>
  * See the KayVee README.md for more on the KayVee configuration.
  */
 public final class ClusterMember {
 
+    private static final String ID = "id";
+    private static final String KAYVEE_URL = "kayVeeUrl";
+    private static final String RAFT_ENDPOINT = "raftEndpoint";
+    private static final String RAFT_HOST = "raftHost";
+    private static final String RAFT_PORT = "raftPort";
+
     @NotEmpty
     private final String id;
 
-    @NotNull
+    @NotEmpty
     private final URL kayVeeUrl;
 
     @NotEmpty
@@ -66,8 +72,15 @@ public final class ClusterMember {
     @Max(65535)
     private final int raftPort;
 
+    /**
+     * Constructor.
+     *
+     * @param id non-null, non-empty unique id of the local KayVee server and its underlying Raft agent
+     * @param kayVeeUrl non-null, non-empty HTTP endpoint to which KayVee REST API calls should be made
+     * @param raftEndpoint non-null, non-empty host:port URL of the local server to which Raft protocol messages can be sent
+     */
     @JsonCreator
-    public ClusterMember(@JsonProperty("id") String id, @JsonProperty("kayVeeUrl") String kayVeeUrl, @JsonProperty("raftEndpoint") String raftEndpoint) {
+    public ClusterMember(@JsonProperty(ID) String id, @JsonProperty(KAYVEE_URL) String kayVeeUrl, @JsonProperty(RAFT_ENDPOINT) String raftEndpoint) {
         this.id = id;
         this.kayVeeUrl = stringToURL(kayVeeUrl);
 
@@ -94,24 +107,50 @@ public final class ClusterMember {
         }
     }
 
+    /**
+     * Get the unique id of the local KayVee server/Raft endpoint.
+     *
+     * @return non-null, non-empty unique id of the local KayVee server/Raft endpoint
+     */
     public String getId() {
         return id;
     }
 
+    /**
+     * Get the HTTP URL of the local server to which
+     * all KayVee REST API requests should be made.
+     *
+     * @return non-null, non-empty HTTP URL of the local
+     * server to which all KayVee REST API requests should be made
+     */
     public String getKayVeeUrl() {
         return kayVeeUrl.toString();
     }
 
+    /**
+     * Get the hostname of the endpoint of the local server
+     * to which all Raft protocol messages should be sent.
+     *
+     * @return non-null, non-empty hostname of the endpoint
+     * of the local server to which all Raft protocol messages should be sent
+     */
     public String getRaftHost() {
         return raftHost;
     }
 
+    /**
+     * Get the port of the endpoint of the local server
+     * to which all Raft protocol messages should be sent.
+     *
+     * @return non-zero port of the endpoint of the local
+     * server to which all Raft protocol messages should be sent
+     */
     public int getRaftPort() {
         return raftPort;
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(@Nullable Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
 
@@ -129,10 +168,10 @@ public final class ClusterMember {
     public String toString() {
         return Objects
                 .toStringHelper(this)
-                .add("id", id)
-                .add("kayVeeUrl", kayVeeUrl)
-                .add("raftHost", raftHost)
-                .add("raftPort", raftPort)
+                .add(ID, id)
+                .add(KAYVEE_URL, kayVeeUrl)
+                .add(RAFT_HOST, raftHost)
+                .add(RAFT_PORT, raftPort)
                 .toString();
     }
 }

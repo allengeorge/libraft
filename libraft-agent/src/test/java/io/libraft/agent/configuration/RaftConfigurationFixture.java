@@ -30,15 +30,19 @@ package io.libraft.agent.configuration;
 
 import com.google.common.collect.ImmutableSet;
 import io.libraft.agent.RaftMember;
+import io.libraft.algorithm.RaftConstants;
 
 import java.net.InetSocketAddress;
 import java.util.Set;
 
 abstract class RaftConfigurationFixture {
 
-    private RaftConfigurationFixture() { // to prevent instantiation
-    }
+    // snapshot fields
+    private static final int MIN_ENTRIES_TO_SNAPSHOT = 100;
+    private static final String SNAPSHOTS_DIRECTORY = "snapshots";
+    private static final int SNAPSHOT_CHECK_INTERVAL = 10000; // 10 seconds
 
+    // cluster members
     private static final Set<RaftMember> RAFT_MEMBERS = ImmutableSet.of(
             new RaftMember("S_00", InetSocketAddress.createUnresolved("192.168.1.100", 9990)),
             new RaftMember("S_01", InetSocketAddress.createUnresolved("192.168.1.100", 9991)),
@@ -55,11 +59,62 @@ abstract class RaftConfigurationFixture {
 
     private static final RaftDatabaseConfiguration RAFT_DATABASE_NO_PASSWORD_CONFIGURATION = new RaftDatabaseConfiguration("org.h2.Driver", "jdbc:h2:test_db", "test", null);
 
+    private static final RaftSnapshotsConfiguration RAFT_SNAPSHOTS_SNAPSHOTS_DISABLED_EXPLICITLY_CONFIGURATION = new RaftSnapshotsConfiguration();
+    static {
+        RAFT_SNAPSHOTS_SNAPSHOTS_DISABLED_EXPLICITLY_CONFIGURATION.setMinEntriesToSnapshot(RaftConstants.SNAPSHOTS_DISABLED);
+    }
+
+    private static final RaftSnapshotsConfiguration RAFT_SNAPSHOTS_SNAPSHOTS_DISABLED_EXPLICITLY_WITH_ADDITIONAL_FIELDS_CONFIGURATION = new RaftSnapshotsConfiguration();
+    static {
+        RAFT_SNAPSHOTS_SNAPSHOTS_DISABLED_EXPLICITLY_WITH_ADDITIONAL_FIELDS_CONFIGURATION.setMinEntriesToSnapshot(RaftConstants.SNAPSHOTS_DISABLED);
+        RAFT_SNAPSHOTS_SNAPSHOTS_DISABLED_EXPLICITLY_WITH_ADDITIONAL_FIELDS_CONFIGURATION.setSnapshotsDirectory(SNAPSHOTS_DIRECTORY);
+        RAFT_SNAPSHOTS_SNAPSHOTS_DISABLED_EXPLICITLY_WITH_ADDITIONAL_FIELDS_CONFIGURATION.setSnapshotCheckInterval(SNAPSHOT_CHECK_INTERVAL);
+    }
+
+    private static final RaftSnapshotsConfiguration RAFT_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_DIRECTORY_ONLY_CONFIGURATION = new RaftSnapshotsConfiguration();
+    static {
+        RAFT_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_DIRECTORY_ONLY_CONFIGURATION.setMinEntriesToSnapshot(MIN_ENTRIES_TO_SNAPSHOT);
+        RAFT_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_DIRECTORY_ONLY_CONFIGURATION.setSnapshotsDirectory(SNAPSHOTS_DIRECTORY);
+    }
+
+    private static final RaftSnapshotsConfiguration RAFT_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_CHECK_INTERVAL_ONLY_CONFIGURATION = new RaftSnapshotsConfiguration();
+    static {
+        RAFT_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_CHECK_INTERVAL_ONLY_CONFIGURATION.setMinEntriesToSnapshot(MIN_ENTRIES_TO_SNAPSHOT);
+        RAFT_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_CHECK_INTERVAL_ONLY_CONFIGURATION.setSnapshotCheckInterval(SNAPSHOT_CHECK_INTERVAL);
+    }
+
+    private static final RaftSnapshotsConfiguration RAFT_SNAPSHOTS_ENABLED_WITH_ALL_FIELDS_CONFIGURATION = new RaftSnapshotsConfiguration();
+    static {
+        RAFT_SNAPSHOTS_ENABLED_WITH_ALL_FIELDS_CONFIGURATION.setMinEntriesToSnapshot(MIN_ENTRIES_TO_SNAPSHOT);
+        RAFT_SNAPSHOTS_ENABLED_WITH_ALL_FIELDS_CONFIGURATION.setSnapshotsDirectory(SNAPSHOTS_DIRECTORY);
+        RAFT_SNAPSHOTS_ENABLED_WITH_ALL_FIELDS_CONFIGURATION.setSnapshotCheckInterval(SNAPSHOT_CHECK_INTERVAL); // 10 seconds
+    }
+
     static final RaftConfiguration RAFT_REQUIRED_FIELDS_ONLY_CONFIGURATION = new RaftConfiguration(RAFT_DATABASE_CONFIGURATION, RAFT_CLUSTER_CONFIGURATION);
 
     static final RaftConfiguration RAFT_REQUIRED_FIELDS_ONLY_EMPTY_PASSWORD_CONFIGURATION = new RaftConfiguration(RAFT_DATABASE_EMPTY_PASSWORD_CONFIGURATION, RAFT_CLUSTER_CONFIGURATION);
 
     static final RaftConfiguration RAFT_REQUIRED_FIELDS_ONLY_NO_PASSWORD_CONFIGURATION = new RaftConfiguration(RAFT_DATABASE_NO_PASSWORD_CONFIGURATION, RAFT_CLUSTER_CONFIGURATION);
+
+    static final RaftConfiguration RAFT_MINIMAL_FIELDS_SNAPSHOTS_DISABLED_EXPLICITLY_CONFIGURATION = new RaftConfiguration(RAFT_DATABASE_NO_PASSWORD_CONFIGURATION, RAFT_CLUSTER_CONFIGURATION);
+    static {
+        RAFT_MINIMAL_FIELDS_SNAPSHOTS_DISABLED_EXPLICITLY_CONFIGURATION.setRaftSnapshotsConfiguration(RAFT_SNAPSHOTS_SNAPSHOTS_DISABLED_EXPLICITLY_CONFIGURATION);
+    }
+
+    static final RaftConfiguration RAFT_MINIMAL_FIELDS_SNAPSHOTS_DISABLED_EXPLICITLY_WITH_ADDITIONAL_SNAPSHOT_FIELDS_CONFIGURATION = new RaftConfiguration(RAFT_DATABASE_NO_PASSWORD_CONFIGURATION, RAFT_CLUSTER_CONFIGURATION);
+    static {
+        RAFT_MINIMAL_FIELDS_SNAPSHOTS_DISABLED_EXPLICITLY_WITH_ADDITIONAL_SNAPSHOT_FIELDS_CONFIGURATION.setRaftSnapshotsConfiguration(RAFT_SNAPSHOTS_SNAPSHOTS_DISABLED_EXPLICITLY_WITH_ADDITIONAL_FIELDS_CONFIGURATION);
+    }
+
+    static final RaftConfiguration RAFT_MINIMAL_FIELDS_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_DIRECTORY_ONLY_CONFIGURATION = new RaftConfiguration(RAFT_DATABASE_NO_PASSWORD_CONFIGURATION, RAFT_CLUSTER_CONFIGURATION);
+    static {
+        RAFT_MINIMAL_FIELDS_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_DIRECTORY_ONLY_CONFIGURATION.setRaftSnapshotsConfiguration(RAFT_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_DIRECTORY_ONLY_CONFIGURATION);
+    }
+
+    static final RaftConfiguration RAFT_MINIMAL_FIELDS_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_CHECK_INTERVAL_ONLY_CONFIGURATION = new RaftConfiguration(RAFT_DATABASE_NO_PASSWORD_CONFIGURATION, RAFT_CLUSTER_CONFIGURATION);
+    static {
+        RAFT_MINIMAL_FIELDS_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_CHECK_INTERVAL_ONLY_CONFIGURATION.setRaftSnapshotsConfiguration(RAFT_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_CHECK_INTERVAL_ONLY_CONFIGURATION);
+    }
 
     static final RaftConfiguration RAFT_ALL_FIELDS_CONFIGURATION = new RaftConfiguration(RAFT_DATABASE_CONFIGURATION, RAFT_CLUSTER_CONFIGURATION);
     static {
@@ -68,7 +123,10 @@ abstract class RaftConfigurationFixture {
         RAFT_ALL_FIELDS_CONFIGURATION.setRPCTimeout(30);
         RAFT_ALL_FIELDS_CONFIGURATION.setHeartbeatInterval(15);
         RAFT_ALL_FIELDS_CONFIGURATION.setConnectTimeout(5000);
-        RAFT_ALL_FIELDS_CONFIGURATION.setMinReconnectInterval(10000);
+        RAFT_ALL_FIELDS_CONFIGURATION.setMinReconnectInterval(SNAPSHOT_CHECK_INTERVAL);
         RAFT_ALL_FIELDS_CONFIGURATION.setAdditionalReconnectIntervalRange(1000);
+        RAFT_ALL_FIELDS_CONFIGURATION.setRaftSnapshotsConfiguration(RAFT_SNAPSHOTS_ENABLED_WITH_ALL_FIELDS_CONFIGURATION);
     }
+
+    private RaftConfigurationFixture() { } // to prevent instantiation
 }

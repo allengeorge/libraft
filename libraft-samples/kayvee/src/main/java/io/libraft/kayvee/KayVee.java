@@ -36,6 +36,9 @@ import io.libraft.agent.RaftAgent;
 import io.libraft.agent.RaftMember;
 import io.libraft.agent.configuration.RaftClusterConfiguration;
 import io.libraft.agent.configuration.RaftConfiguration;
+import io.libraft.agent.configuration.RaftDatabaseConfiguration;
+import io.libraft.agent.configuration.RaftSnapshotsConfiguration;
+import io.libraft.kayvee.configuration.ClusterConfiguration;
 import io.libraft.kayvee.configuration.ClusterMember;
 import io.libraft.kayvee.configuration.KayVeeConfiguration;
 import io.libraft.kayvee.health.DistributedStoreCheck;
@@ -92,15 +95,17 @@ public class KayVee extends Service<KayVeeConfiguration> {
     }
 
     private RaftConfiguration createRaftConfiguration(KayVeeConfiguration configuration) {
+        ClusterConfiguration clusterConfiguration = configuration.getClusterConfiguration();
         Set<RaftMember> raftMembers = Sets.newHashSet();
-
-        for (ClusterMember member : configuration.getClusterConfiguration().getMembers()) {
+        for (ClusterMember member : clusterConfiguration.getMembers()) {
             raftMembers.add(new RaftMember(member.getId(), InetSocketAddress.createUnresolved(member.getRaftHost(), member.getRaftPort())));
         }
+        RaftClusterConfiguration raftClusterConfiguration = new RaftClusterConfiguration(clusterConfiguration.getSelf(), raftMembers);
 
-        RaftClusterConfiguration raftClusterConfiguration = new RaftClusterConfiguration(configuration.getClusterConfiguration().getSelf(), raftMembers);
+        RaftDatabaseConfiguration raftDatabaseConfiguration = configuration.getRaftDatabaseConfiguration();
+        RaftSnapshotsConfiguration snapshotsConfiguration = configuration.getSnapshotsConfiguration();
 
-        RaftConfiguration raftConfiguration = new RaftConfiguration(configuration.getRaftDatabaseConfiguration(), raftClusterConfiguration);
+        RaftConfiguration raftConfiguration = new RaftConfiguration(raftDatabaseConfiguration, raftClusterConfiguration);
         raftConfiguration.setConnectTimeout(3000);
         raftConfiguration.setMinReconnectInterval(3000);
         raftConfiguration.setAdditionalReconnectIntervalRange(0);
@@ -108,6 +113,7 @@ public class KayVee extends Service<KayVeeConfiguration> {
         raftConfiguration.setAdditionalElectionTimeoutRange(10000);
         raftConfiguration.setHeartbeatInterval(7000);
         raftConfiguration.setRPCTimeout(1000);
+        raftConfiguration.setRaftSnapshotsConfiguration(snapshotsConfiguration);
 
         return raftConfiguration;
     }

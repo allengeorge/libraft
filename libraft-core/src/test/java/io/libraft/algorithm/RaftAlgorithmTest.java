@@ -32,11 +32,16 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ListenableFuture;
 import io.libraft.Command;
+import io.libraft.Committed;
 import io.libraft.CommittedCommand;
 import io.libraft.NotLeaderException;
 import io.libraft.RaftListener;
 import io.libraft.ReplicationException;
+import io.libraft.Snapshot;
 import io.libraft.testlib.TestLoggingRule;
+import org.hamcrest.Description;
+import org.hamcrest.Matcher;
+import org.hamcrest.TypeSafeMatcher;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -47,6 +52,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Random;
@@ -54,7 +60,6 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 import static io.libraft.algorithm.RaftAlgorithm.Role.CANDIDATE;
 import static io.libraft.algorithm.RaftAlgorithm.Role.FOLLOWER;
@@ -64,6 +69,9 @@ import static io.libraft.algorithm.StoringSender.AppendEntriesReply;
 import static io.libraft.algorithm.StoringSender.RPCCall;
 import static io.libraft.algorithm.StoringSender.RequestVote;
 import static io.libraft.algorithm.StoringSender.RequestVoteReply;
+import static io.libraft.algorithm.UnitTestLogEntries.CLIENT;
+import static io.libraft.algorithm.UnitTestLogEntries.NOOP;
+import static io.libraft.algorithm.UnitTestLogEntries.SENTINEL;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
@@ -72,15 +80,15 @@ import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.instanceOf;
-import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
-import static org.hamcrest.Matchers.theInstance;
+import static org.hamcrest.Matchers.sameInstance;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyCollection;
 import static org.mockito.Matchers.anyLong;
 import static org.mockito.Matchers.anyString;
+import static org.mockito.Matchers.argThat;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doThrow;
@@ -90,6 +98,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 @SuppressWarnings({"unchecked", "ConstantConditions"})
 public final class RaftAlgorithmTest {
@@ -112,6 +121,7 @@ public final class RaftAlgorithmTest {
     private final InMemoryStore store = spy(new InMemoryStore());
     private final InMemoryLog log = spy(new InMemoryLog());
     private final RaftListener listener = mock(RaftListener.class);
+    private final SnapshotsStore snapshotsStore = mock(SnapshotsStore.class);
 
     private RaftAlgorithm algorithm;
 
@@ -131,10 +141,14 @@ public final class RaftAlgorithmTest {
                 sender,
                 store,
                 log,
+                snapshotsStore,
                 listener,
                 SELF,
                 CLUSTER,
-                RaftConstants.RPC_TIMEOUT, RaftConstants.MIN_ELECTION_TIMEOUT,
+                30, // want this to be high enough that the standard tests won't trigger the snapshot, but low enough that testing snapshots isn't onerous
+                RaftConstants.SNAPSHOT_CHECK_INTERVAL,
+                RaftConstants.RPC_TIMEOUT,
+                RaftConstants.MIN_ELECTION_TIMEOUT,
                 0, // don't want any additional time to be added to the min timeout (makes reasoning about tests easier)
                 RaftConstants.HEARTBEAT_INTERVAL,
                 RaftConstants.TIME_UNIT);
@@ -151,25 +165,12 @@ public final class RaftAlgorithmTest {
     // TODO (AG): consider writing custom matchers so that I can use the nice "assertThat" syntax
     // TODO (AG): consider creating a DSL and refactoring out even more common code to reduce test length
 
+    private void clearLog() throws StorageException {
+        UnitTestLogEntries.clearLog(log);
+    }
+
     private void insertIntoLog(LogEntry... entries) throws StorageException {
-        checkArgument(entries != null && entries.length > 0);
-
-        for (LogEntry entry : entries) {
-            log.put(entry);
-        }
-    }
-
-    @SuppressWarnings("SameReturnValue")
-    private LogEntry SENTINEL() {
-        return LogEntry.SENTINEL;
-    }
-
-    private LogEntry.NoopEntry NOOP(long index, long term) {
-        return new LogEntry.NoopEntry(index, term);
-    }
-
-    private LogEntry.ClientEntry CLIENT(long index, long term, Command command) {
-        return new LogEntry.ClientEntry(index, term, command);
+        UnitTestLogEntries.insertIntoLog(log, entries);
     }
 
     //================================================================================================================//
@@ -178,21 +179,16 @@ public final class RaftAlgorithmTest {
     //
     //================================================================================================================//
 
-    private void assertThatLogContainsOnlySentinel() throws StorageException {
-        LogEntry lastLog = log.getLast();
+    private void assertThatLogIsEmpty() throws StorageException {
+        UnitTestLogEntries.assertThatLogIsEmpty(log);
+    }
 
-        assertThat(lastLog, notNullValue());
-        assertThat(lastLog, theInstance(SENTINEL()));
+    private void assertThatLogContainsOnlySentinel() throws StorageException {
+        UnitTestLogEntries.assertThatLogContainsOnlySentinel(log);
     }
 
     private void assertThatLogContains(LogEntry... entries) throws StorageException {
-        entries = checkNotNull(entries);
-        checkArgument(entries.length > 0);
-
-        long logIndex = 0;
-        for(LogEntry entry : entries) {
-            assertThat(entry, equalTo(log.get(logIndex++)));
-        }
+        UnitTestLogEntries.assertThatLogContains(log, entries);
     }
 
     private void assertThatTermAndCommitIndexHaveValues(long term, long commitIndex) throws StorageException {
@@ -302,6 +298,50 @@ public final class RaftAlgorithmTest {
 
     //================================================================================================================//
     //
+    // Custom Matcher for CommittedCommand
+    //
+    //================================================================================================================//
+
+    private Matcher<CommittedCommand> isCommittedCommandAtIndex(final long logIndex, final Command command) {
+        return new TypeSafeMatcher<CommittedCommand>() {
+            @Override
+            protected boolean matchesSafely(CommittedCommand item) {
+                return logIndex == item.getIndex() && command.equals(item.getCommand());
+            }
+
+            @Override
+            public void describeTo(Description description) {
+                description.appendText("getIndex should return ").appendValue(logIndex).appendText(" and getCommand should return").appendValue(command);
+            }
+
+            @Override
+            protected void describeMismatchSafely(CommittedCommand item, Description mismatchDescription) {
+                mismatchDescription.appendText(" getIndex was ").appendValue(item.getIndex()).appendText(" and getCommand was ").appendValue(item.getCommand());
+            }
+        };
+    }
+
+    private Matcher<Committed> isSkipAtIndex(final long logIndex) {
+        return new TypeSafeMatcher<Committed>() {
+            @Override
+            protected boolean matchesSafely(Committed item) {
+                return item.getType() == Committed.Type.SKIP && item.getIndex() == logIndex;
+            }
+
+            @Override
+            public void describeTo(Description description) {
+                description.appendText("type should be ").appendValue(Committed.Type.SKIP).appendText(" and getIndex should return ").appendValue(logIndex);
+            }
+
+            @Override
+            protected void describeMismatchSafely(Committed item, Description mismatchDescription) {
+                mismatchDescription.appendText(" getType was ").appendValue(item.getType()).appendText(" and getIndex was ").appendValue(item.getIndex());
+            }
+        };
+    }
+
+    //================================================================================================================//
+    //
     // Consensus Tests
     //
     //================================================================================================================//
@@ -322,7 +362,7 @@ public final class RaftAlgorithmTest {
         // when RaftAlgorithm starts, we immediately schedule
         // an election timeout, and wait for an AppendEntries, or...any message
         // that tells us what the environment is like
-        long electionTimeoutTick = timer.getTickForLastScheduledTask();
+        long electionTimeoutTick = getElectionTimeoutTick();
         long preElectionTerm = store.getCurrentTerm();
         long preElectionCommitIndex = store.getCommitIndex();
 
@@ -343,8 +383,28 @@ public final class RaftAlgorithmTest {
     }
 
     private void triggerElection(long electionTerm) throws StorageException {
-        timer.fastForward();
+        fastForwardToElection();
         assertThatSelfTransitionedToCandidate(electionTerm, store.getCommitIndex());
+    }
+
+    private void fastForwardToElection() {
+        Timer.TimeoutHandle handle = algorithm.getElectionTimeoutHandleForUnitTestsOnly();
+        timer.fastForwardTillTaskExecutes(handle);
+    }
+
+    private void fastForwardToHeartbeat() {
+        Timer.TimeoutHandle handle = algorithm.getHeartbeatTimeoutHandleForUnitTestsOnly();
+        timer.fastForwardTillTaskExecutes(handle);
+    }
+
+    private long getElectionTimeoutTick() {
+        Timer.TimeoutHandle handle = algorithm.getElectionTimeoutHandleForUnitTestsOnly();
+        return timer.getTickForHandle(handle);
+    }
+
+    private long getHeartbeatTimeoutTick() {
+        Timer.TimeoutHandle handle = algorithm.getHeartbeatTimeoutHandleForUnitTestsOnly();
+        return timer.getTickForHandle(handle);
     }
 
     @Test
@@ -465,7 +525,8 @@ public final class RaftAlgorithmTest {
                 SENTINEL(),
                 NOOP(1, 1),
                 NOOP(2, 1),
-                NOOP(3, 2)
+                NOOP(3, 2),
+                NOOP(4, 3) // this NOOP is sent out immediately once we become the leader
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -479,9 +540,6 @@ public final class RaftAlgorithmTest {
         assertThatSelfTransitionedToFollower(2, 0, S_04, true);
         triggerElection(3);
 
-        // get the point at which the election is going to time out
-        long electionTimeoutTick = timer.getTickForLastScheduledTask();
-
         // ensure that the first batch of request votes were sent out to _all_ the servers
         requestVotes = getRPCs(4, RequestVote.class);
         assertThatRPCsSentTo(requestVotes, S_01, S_02, S_03, S_04);
@@ -489,7 +547,7 @@ public final class RaftAlgorithmTest {
         assertThatNoMoreRPCsWereSent();
 
         // simulate an RPC timeout, indicating that no server voted for us
-        timer.fastForward();
+        timer.fastForward(RaftConstants.RPC_TIMEOUT);
 
         // check that RequestVote RPCs were issued to all servers in the cluster
         requestVotes = getRPCs(4, RequestVote.class);
@@ -501,14 +559,14 @@ public final class RaftAlgorithmTest {
         algorithm.onRequestVoteReply(S_02, 3, true);
 
         // simulate a second RPC timeout
-        timer.fastForward();
+        timer.fastForward(RaftConstants.RPC_TIMEOUT);
 
         // ensure that RequestVote RPCs are only sent to _non-voting_ servers
         assertThatRequestVoteRPCsSentToNonVotingServers();
         assertThatNoMoreRPCsWereSent();
 
         // check that we keep sending RequestVote RPCs to the non-voting servers for term 3
-        long ticksUntilElectionConcludes = electionTimeoutTick - timer.getTick();
+        long ticksUntilElectionConcludes = getElectionTimeoutTick() - timer.getTick();
         long numRequestVoteRPCRounds = (ticksUntilElectionConcludes / RaftConstants.RPC_TIMEOUT) - 1; // subtract - 1 because the last round will occur _exactly_ on the election timeout
         for (int i = 0; i < numRequestVoteRPCRounds; i++) {
             timer.fastForward(RaftConstants.RPC_TIMEOUT);
@@ -516,7 +574,7 @@ public final class RaftAlgorithmTest {
         }
 
         // now, move up to the election timeout
-        timer.fastForward();
+        fastForwardToElection();
 
         // check that the first election concluded unsuccessfully
         // and that we're still vying for election
@@ -556,8 +614,7 @@ public final class RaftAlgorithmTest {
         triggerElection(3);
 
         // check when the election timeout will occur
-        // this only works because there is only one 'long' timeout task pending : the election timeout
-        long electionTimeoutTick = timer.getTickForLastScheduledTask();
+        long electionTimeoutTick = getElectionTimeoutTick();
 
         // check that the first batch of Request Vote RPCs were sent out
         requestVotes = getRPCs(4, RequestVote.class);
@@ -565,9 +622,9 @@ public final class RaftAlgorithmTest {
         assertThatRequestVotesHaveValues(requestVotes, 3, 0, 0);
         assertThatNoMoreRPCsWereSent();
 
-        // receive a single positive vote before the election timeout
+        // receive a single positive vote before the first RPC timeout
         algorithm.onRequestVoteReply(S_02, 3, true);
-        timer.fastForward();
+        timer.fastForward(RaftConstants.RPC_TIMEOUT);
 
         // request votes from all non-voting servers
         requestVotes = getRPCs(3, RequestVote.class);
@@ -604,7 +661,7 @@ public final class RaftAlgorithmTest {
         assertThatTermAndCommitIndexHaveValues(3, 0);
 
         // now, move to the final election timeout
-        timer.fastForward();
+        fastForwardToElection();
 
         // at this point, a couple of things should have happened:
         // 1. no leader was chosen in term '3', so a new election for term '4' will be triggered
@@ -664,7 +721,7 @@ public final class RaftAlgorithmTest {
 
         // move time forward half-way into the election
         // assume that we're getting no replies
-        long preRequestVoteElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long preRequestVoteElectionTimeoutTick = getElectionTimeoutTick();
         long ticksBeforeRequestVoteIsReceived = (preRequestVoteElectionTimeoutTick - timer.getTick()) / 2;
         timer.fastForward(ticksBeforeRequestVoteIsReceived);
 
@@ -680,7 +737,7 @@ public final class RaftAlgorithmTest {
         assertThatNoMoreRPCsWereSent();
 
         // and that we increased our election timeout
-        long postRequestVoteElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long postRequestVoteElectionTimeoutTick = getElectionTimeoutTick();
         assertThat(postRequestVoteElectionTimeoutTick, greaterThan(preRequestVoteElectionTimeoutTick));
         assertThat(postRequestVoteElectionTimeoutTick, equalTo(timer.getTick() + RaftConstants.MIN_ELECTION_TIMEOUT));
 
@@ -696,7 +753,7 @@ public final class RaftAlgorithmTest {
 
         // move time forward half-way into the election
         // assume that we're getting no messages
-        long preRequestVoteElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long preRequestVoteElectionTimeoutTick = getElectionTimeoutTick();
         long ticksBeforeRequestVoteIsReceived = (preRequestVoteElectionTimeoutTick - timer.getTick()) / 2;
         timer.fastForward(ticksBeforeRequestVoteIsReceived);
 
@@ -713,7 +770,7 @@ public final class RaftAlgorithmTest {
         assertThatNoMoreRPCsWereSent();
 
         // and that we increased our election timeout
-        long postRequestVoteElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long postRequestVoteElectionTimeoutTick = getElectionTimeoutTick();
         assertThat(postRequestVoteElectionTimeoutTick, greaterThan(preRequestVoteElectionTimeoutTick));
         assertThat(postRequestVoteElectionTimeoutTick, equalTo(timer.getTick() + RaftConstants.MIN_ELECTION_TIMEOUT));
 
@@ -726,13 +783,13 @@ public final class RaftAlgorithmTest {
     public void shouldIncreaseCurrentTermAndGrantVoteAndResetElectionTimeoutIfReceiveARequestVoteWithHigherTermWhileCurrentlyALeader() throws StorageException {
         becomeLeaderInTerm(3, false);
 
-        // move time forward half-way into the election
+        // move time forward half-way to the point at which we'd send out a heartbeat
         // assume that we're getting no replies
-        long preRequestVoteElectionTimeoutTick = timer.getTickForLastScheduledTask();
-        long ticksBeforeRequestVoteIsReceived = (preRequestVoteElectionTimeoutTick - timer.getTick()) / 2;
+        long preRequestVoteHeartbeatTimeoutTick = getHeartbeatTimeoutTick();
+        long ticksBeforeRequestVoteIsReceived = (preRequestVoteHeartbeatTimeoutTick - timer.getTick()) / 2;
         timer.fastForward(ticksBeforeRequestVoteIsReceived);
 
-        sender.drainSentRPCs(); // clear out all the sent heartbeats
+        sender.drainSentRPCs(); // clear out any heartbeats we may have already sent
 
         // get a Request Vote with a greater term and a greater prevLogTerm
         // check that the vote was granted, and that we've shifted our state
@@ -744,8 +801,8 @@ public final class RaftAlgorithmTest {
         assertThatNoMoreRPCsWereSent();
 
         // and that we increased our election timeout
-        long postRequestVoteElectionTimeoutTick = timer.getTickForLastScheduledTask();
-        assertThat(postRequestVoteElectionTimeoutTick, greaterThan(preRequestVoteElectionTimeoutTick));
+        long postRequestVoteElectionTimeoutTick = getElectionTimeoutTick();
+        assertThat(postRequestVoteElectionTimeoutTick, greaterThan(preRequestVoteHeartbeatTimeoutTick));
         assertThat(postRequestVoteElectionTimeoutTick, equalTo(timer.getTick() + RaftConstants.MIN_ELECTION_TIMEOUT));
 
         // and that our final state is sane
@@ -764,7 +821,7 @@ public final class RaftAlgorithmTest {
         // start the election in term 3
         triggerElection(3);
 
-        long preAppendEntriesElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long preAppendEntriesElectionTimeoutTick = getElectionTimeoutTick();
         long ticksBeforeAppendEntriesReceived = (preAppendEntriesElectionTimeoutTick - timer.getTick()) / 2;
 
         // ensure that we've started requesting votes
@@ -785,7 +842,7 @@ public final class RaftAlgorithmTest {
         // check that we become a follower for this guy
         // and that we reschedule our election timeout
         // and that we send back a nice reply
-        long postAppendEntriesElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long postAppendEntriesElectionTimeoutTick = getElectionTimeoutTick();
 
         assertThatSelfTransitionedToFollower(3, 0, S_03, true);
         assertThat(postAppendEntriesElectionTimeoutTick, greaterThan(preAppendEntriesElectionTimeoutTick));
@@ -806,7 +863,7 @@ public final class RaftAlgorithmTest {
         // start the election in term 3
         triggerElection(3);
 
-        long preAppendEntriesElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long preAppendEntriesElectionTimeoutTick = getElectionTimeoutTick();
         long ticksBeforeAppendEntriesReceived = (preAppendEntriesElectionTimeoutTick - timer.getTick()) / 2;
 
         // ensure that we've started requesting votes
@@ -827,7 +884,7 @@ public final class RaftAlgorithmTest {
         // check that we become a follower for this guy
         // and that we reschedule our election timeout
         // and that we send back a nice reply
-        long postAppendEntriesElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long postAppendEntriesElectionTimeoutTick = getElectionTimeoutTick();
 
         assertThatSelfTransitionedToFollower(4, 0, S_03, true);
         assertThat(postAppendEntriesElectionTimeoutTick, greaterThan(preAppendEntriesElectionTimeoutTick));
@@ -848,7 +905,7 @@ public final class RaftAlgorithmTest {
         // start the election in term 3
         triggerElection(3);
 
-        long preAppendEntriesElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long preAppendEntriesElectionTimeoutTick = getElectionTimeoutTick();
         long ticksBeforeAppendEntriesReceived = (preAppendEntriesElectionTimeoutTick - timer.getTick()) / 2;
 
         // ensure that we've started requesting votes
@@ -870,7 +927,7 @@ public final class RaftAlgorithmTest {
         // regardless of that, check that we become a follower for this guy
         // and that we reschedule our election timeout
         // and that we send back a nice reply
-        long postAppendEntriesElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long postAppendEntriesElectionTimeoutTick = getElectionTimeoutTick();
 
         assertThatSelfTransitionedToFollower(4, 0, S_03, true); // we can't have changed our commit index
         assertThat(postAppendEntriesElectionTimeoutTick, greaterThan(preAppendEntriesElectionTimeoutTick));
@@ -1179,7 +1236,7 @@ public final class RaftAlgorithmTest {
         assertThatSelfTransitionedToFollower(3, 0, S_01, true);
         verifyNoMoreInteractions(listener); // we're notified once about a leadership change, and then never again
 
-        long preAppendEntriesElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long preAppendEntriesElectionTimeoutTick = getElectionTimeoutTick();
 
         // fast forward half-way into the election timeout period
         // this allows us to verify easily that the election timeout was reset
@@ -1190,7 +1247,7 @@ public final class RaftAlgorithmTest {
         algorithm.onAppendEntries(S_01, 3, 0, 0, 0, null);
 
         // verify that we've reset the election timeout
-        long postAppendEntriesElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long postAppendEntriesElectionTimeoutTick = getElectionTimeoutTick();
         assertThat(postAppendEntriesElectionTimeoutTick, greaterThan(preAppendEntriesElectionTimeoutTick));
         assertThat(postAppendEntriesElectionTimeoutTick, equalTo(timer.getTick() + RaftConstants.MIN_ELECTION_TIMEOUT));
 
@@ -1202,7 +1259,7 @@ public final class RaftAlgorithmTest {
     public void shouldResetElectionTimeoutAndSetSendingServerAsLeaderOnReceivingAnAppendEntriesForElectionTerm() throws StorageException {
         store.setCurrentTerm(3);
 
-        long preAppendEntriesElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long preAppendEntriesElectionTimeoutTick = getElectionTimeoutTick();
 
         assertThatSelfTransitionedToFollower(3, 0, null, false);
 
@@ -1216,7 +1273,7 @@ public final class RaftAlgorithmTest {
         assertThatSelfTransitionedToFollower(3, 0, S_01, true);
 
         // verify that we've reset the election timeout
-        long postAppendEntriesElectionTimeoutTick = timer.getTickForLastScheduledTask();
+        long postAppendEntriesElectionTimeoutTick = getElectionTimeoutTick();
         assertThat(postAppendEntriesElectionTimeoutTick, greaterThan(preAppendEntriesElectionTimeoutTick));
         assertThat(postAppendEntriesElectionTimeoutTick, equalTo(timer.getTick() + RaftConstants.MIN_ELECTION_TIMEOUT));
 
@@ -1462,16 +1519,15 @@ public final class RaftAlgorithmTest {
         algorithm.becomeFollower(3, S_03);
         assertThatSelfTransitionedToFollower(3, 0, S_03, true);
 
-        // this only works because I know that the longest timeout
-        // for the follower will be the election timeout
-        long initialElectionTimeout = timer.getTickForLastScheduledTask();
-        assertThat(initialElectionTimeout, greaterThanOrEqualTo((long) RaftConstants.MIN_ELECTION_TIMEOUT));
+        // get the ticks till the initial election timeout
+        long initialElectionTimeout = getElectionTimeoutTick();
+        assertThat(initialElectionTimeout, equalTo((long) RaftConstants.MIN_ELECTION_TIMEOUT)); // time is 0
 
         long electionTimeoutInterval = initialElectionTimeout - timer.getTick();
         timer.fastForward(electionTimeoutInterval / 2);
 
-        // the election timeout is still the latest scheduled task
-        assertThat(timer.getTickForLastScheduledTask(), equalTo(initialElectionTimeout));
+        // verify that the election timeout has still not changed
+        assertThat(getElectionTimeoutTick(), equalTo(initialElectionTimeout));
 
         // not a heartbeat
         algorithm.onAppendEntries(S_03, 3, 0, 0, 0, Lists.<LogEntry>newArrayList(NOOP(1, 1)));
@@ -1482,7 +1538,7 @@ public final class RaftAlgorithmTest {
 
         // the new election timeout was scheduled
         // scheduled as an offset from the current tick
-        assertThat(timer.getTickForLastScheduledTask(), greaterThanOrEqualTo(timer.getTick() + RaftConstants.MIN_ELECTION_TIMEOUT));
+        assertThat(getElectionTimeoutTick(), greaterThanOrEqualTo(timer.getTick() + RaftConstants.MIN_ELECTION_TIMEOUT));
 
         assertThatLogContains(
                 SENTINEL(),
@@ -1496,14 +1552,14 @@ public final class RaftAlgorithmTest {
         algorithm.becomeFollower(3, S_03);
         assertThatSelfTransitionedToFollower(3, 0, S_03, true);
 
-        // calculate the initial election timeout
-        long initialElectionTimeout = timer.getTickForLastScheduledTask();
+        // calculate the ticks till initial election timeout
+        long initialElectionTimeout = getElectionTimeoutTick();
         long electionTimeoutInterval = initialElectionTimeout - timer.getTick();
 
         timer.fastForward(electionTimeoutInterval / 2);
 
         // the election timeout is still active
-        assertThat(timer.getTickForLastScheduledTask(), equalTo(initialElectionTimeout));
+        assertThat(getElectionTimeoutTick(), equalTo(initialElectionTimeout));
 
         // receive an AppendEntries for a lower term
         // we're also going to reject it because the sender
@@ -1516,7 +1572,7 @@ public final class RaftAlgorithmTest {
         assertThatNoMoreRPCsWereSent();
 
         // the election timeout hasn't changed
-        assertThat(timer.getTickForLastScheduledTask(), equalTo(initialElectionTimeout));
+        assertThat(getElectionTimeoutTick(), equalTo(initialElectionTimeout));
 
         // check the leader just to make sure
         assertThat(algorithm.getLeader(), equalTo(S_03));
@@ -1561,7 +1617,7 @@ public final class RaftAlgorithmTest {
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_02, 3, 1, 1, true);
         assertThatNoMoreRPCsWereSent();
 
-        verify(listener, times(0)).applyCommand(anyLong(), any(Command.class));
+        verify(listener, times(0)).applyCommitted(any(Committed.class));
 
         assertThatLogContains(
                 SENTINEL(),
@@ -1595,8 +1651,6 @@ public final class RaftAlgorithmTest {
     // because they will be taken care of in other tests
     @Test
     public void shouldNeverCreateLogWithHolesInItLongerTest() throws StorageException {
-        // TODO (AG): I think I should be able to come up with some rules to generate an arbitrary sequence of messages
-
         // Log (SELF):
         //
         //   0   1   2   3
@@ -1770,17 +1824,25 @@ public final class RaftAlgorithmTest {
         algorithm.becomeFollower(3, S_04);
         assertThatSelfTransitionedToFollower(3, 1, S_04, true);
 
+        // we're sent 3 additional log entries, all of which are committed
         algorithm.onAppendEntries(S_04, 3, 4, 1, 1, Lists.<LogEntry>newArrayList(
                 NOOP(2, 2),
                 NOOP(3, 2),
                 NOOP(4, 3)
         ));
 
+        // check that we ack this
         AppendEntriesReply appendEntriesReply = sender.nextAndRemove(AppendEntriesReply.class);
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_04, 3, 1, 3, true);
         assertThatNoMoreRPCsWereSent();
 
-        verifyNoMoreInteractions(listener); // don't notify listener of committed noops
+        // verify that we notify the listener that these entries have been committed
+        // but, since they're noops, we should simply update our concept of time, and not 'do' anything
+        InOrder notificationOrder = inOrder(listener);
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(2)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(3)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(4)));
+        notificationOrder.verifyNoMoreInteractions();
 
         assertThatLogContains(
                 SENTINEL(),
@@ -1807,13 +1869,22 @@ public final class RaftAlgorithmTest {
         algorithm.becomeFollower(3, S_04);
         assertThatSelfTransitionedToFollower(3, 3, S_04, true);
 
+        // we're given an additional entry
+        // but, it's not committed
+        // only entries 4 -> 6 are committed
         algorithm.onAppendEntries(S_04, 3, 6, 6, 3, Lists.<LogEntry>newArrayList(NOOP(7, 3)));
 
         AppendEntriesReply appendEntriesReply = sender.nextAndRemove(AppendEntriesReply.class);
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_04, 3, 6, 1, true);
         assertThatNoMoreRPCsWereSent();
 
-        verifyNoMoreInteractions(listener); // don't notify listener of committed noops
+        // verify that we notify the listener that these entries have been committed
+        // but, since they're noops they're communicated to the listener as 'skip' entries
+        InOrder notificationOrder = inOrder(listener);
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(4)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(5)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(6)));
+        notificationOrder.verifyNoMoreInteractions();
 
         assertThatLogContains(
                 SENTINEL(),
@@ -1836,16 +1907,23 @@ public final class RaftAlgorithmTest {
                 NOOP(3, 3)
         );
 
+        // we're in term 3, with some entries, but nothing has been committed
         algorithm.becomeFollower(3, S_02);
         assertThatSelfTransitionedToFollower(3, 0, S_02, true);
 
+        // we're notified that all the entries in our log were committed
         algorithm.onAppendEntries(S_02, 3, 3, 3, 3, null);
 
         AppendEntriesReply appendEntriesReply = sender.nextAndRemove(AppendEntriesReply.class);
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_02, 3, 3, 0, true);
         assertThatNoMoreRPCsWereSent();
 
-        verifyNoMoreInteractions(listener); // don't notify listener of committed noops
+        // we notify the listener that these have been committed and that they're to be skipped
+        InOrder notificationOrder = inOrder(listener);
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(1)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(2)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(3)));
+        notificationOrder.verifyNoMoreInteractions();
 
         assertThatLogContains(
                 SENTINEL(),
@@ -1862,6 +1940,7 @@ public final class RaftAlgorithmTest {
         UnitTestCommand commandAtIndex2 = new UnitTestCommand();
         UnitTestCommand commandAtIndex4 = new UnitTestCommand();
 
+        // we start off with the commit index at 1
         insertIntoLog(
                 CLIENT(1, 1, commandAtIndex1),
                 CLIENT(2, 1, commandAtIndex2),
@@ -1872,6 +1951,7 @@ public final class RaftAlgorithmTest {
         algorithm.becomeFollower(3, S_03);
         assertThatSelfTransitionedToFollower(3, 1, S_03, true);
 
+        // we're informed of another entry at index 4, and told that everything up to this index is committed
         algorithm.onAppendEntries(S_03, 3, 4, 3, 3, Lists.<LogEntry>newArrayList(CLIENT(4, 3, commandAtIndex4)));
 
         AppendEntriesReply appendEntriesReply = sender.nextAndRemove(AppendEntriesReply.class);
@@ -1879,8 +1959,9 @@ public final class RaftAlgorithmTest {
         assertThatNoMoreRPCsWereSent();
 
         InOrder notificationOrder = inOrder(listener);
-        notificationOrder.verify(listener).applyCommand(2, commandAtIndex2);
-        notificationOrder.verify(listener).applyCommand(4, commandAtIndex4);
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(2, commandAtIndex2)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(3)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(4, commandAtIndex4)));
         notificationOrder.verifyNoMoreInteractions();
 
         assertThatLogContains(
@@ -1946,6 +2027,9 @@ public final class RaftAlgorithmTest {
         algorithm.onAppendEntriesReply(S_03, 3, 0, 1, true);
         algorithm.onAppendEntriesReply(S_04, 3, 0, 1, true);
 
+        // verify that the listener was notified of this committed noop
+        verify(listener).applyCommitted(argThat(isSkipAtIndex(1)));
+
         // check that we've not done anything funky to the log, but we've bumped our commitIndex
         // hopefully, this means internally we've now moved nextIndex for all the servers
         assertThatLogContains(
@@ -1957,7 +2041,7 @@ public final class RaftAlgorithmTest {
         // verify that we've still got a valid heartbeat scheduled
         // since we haven't moved time at all, the timer's tick is sitting at 0
         // so the scheduled heartbeat is at (currentTick (0) + HEARTBEAT_INTERVAL)
-        long heartbeatTimeout = timer.getTickForLastScheduledTask();
+        long heartbeatTimeout = getHeartbeatTimeoutTick();
         assertThat(heartbeatTimeout, equalTo((long) RaftConstants.HEARTBEAT_INTERVAL));
     }
 
@@ -1965,7 +2049,7 @@ public final class RaftAlgorithmTest {
     public void shouldMarkEntryAsCommittedAndNotifyListenerIfCommandFromThisTermReceivesAQuorumOfAcks() throws StorageException, RPCException, NotLeaderException {
         becomeLeaderInTerm3OnFirstBoot();
 
-        long heartbeatTimeout = timer.getTickForLastScheduledTask();
+        long heartbeatTimeout = getHeartbeatTimeoutTick();
         assertThat(heartbeatTimeout, equalTo((long) RaftConstants.HEARTBEAT_INTERVAL));
 
         // move time forward a bit, but not enough to trigger the heartbeat
@@ -1997,10 +2081,10 @@ public final class RaftAlgorithmTest {
         assertThatTermAndCommitIndexHaveValues(3, 2);
 
         // notified the listener
-        verify(listener, times(1)).applyCommand(2, command);
+        verify(listener, times(1)).applyCommitted(argThat(isCommittedCommandAtIndex(2, command)));
 
         // move to the heartbeat timeout
-        timer.fastForward();
+        fastForwardToHeartbeat();
 
         // verify that our commitIndex was updated
         // and is being sent out properly with subsequent heartbeats
@@ -2026,7 +2110,7 @@ public final class RaftAlgorithmTest {
     public void shouldIgnoreDuplicateAppendEntriesReplyForUncommittedEntry() throws StorageException, RPCException, NotLeaderException {
         becomeLeaderInTerm3OnFirstBoot();
 
-        long heartbeatTimeout = timer.getTickForLastScheduledTask();
+        long heartbeatTimeout = getHeartbeatTimeoutTick();
         long heartbeatInterval = heartbeatTimeout - timer.getTick();
 
         UnitTestCommand command = new UnitTestCommand();
@@ -2045,6 +2129,7 @@ public final class RaftAlgorithmTest {
 
         timer.fastForward(heartbeatInterval / 2);
 
+        // receive duplicate AppendEntries responses from the same peer
         algorithm.onAppendEntriesReply(S_01, 3, 1, 1, true);
         algorithm.onAppendEntriesReply(S_01, 3, 1, 1, true);
 
@@ -2179,7 +2264,7 @@ public final class RaftAlgorithmTest {
         );
         assertThatNoMoreRPCsWereSent();
 
-        long heartbeatTimeout = timer.getTickForLastScheduledTask();
+        long heartbeatTimeout = getHeartbeatTimeoutTick();
         long heartbeatInterval = heartbeatTimeout - timer.getTick();
 
         // now, receive agreement from two people for logIndex 3
@@ -2207,7 +2292,7 @@ public final class RaftAlgorithmTest {
     public void shouldMarkEntryAsCommittedIfReceiveAQuorumOfAcks() throws RPCException, StorageException {
         setupLeaderForCommitUnitTests();
 
-        long heartbeatTimeout = timer.getTickForLastScheduledTask();
+        long heartbeatTimeout = getHeartbeatTimeoutTick();
         long heartbeatInterval = heartbeatTimeout - timer.getTick();
 
         // move time forward a bit and get our first responses
@@ -2229,8 +2314,7 @@ public final class RaftAlgorithmTest {
 
         // move to the heartbeat timeout and verify that we've updated
         // nextIndex and the commitIndex appropriately
-
-        timer.fastForward();
+        fastForwardToHeartbeat();
 
         Collection<AppendEntries> heartbeats = getRPCs(4, AppendEntries.class);
         for (AppendEntries heartbeat : heartbeats) {
@@ -2343,7 +2427,7 @@ public final class RaftAlgorithmTest {
     public void shouldNotMarkCommandAsCommittedIfNotReceiveAQuorumOfAcks() throws RPCException, StorageException, NotLeaderException {
         becomeLeaderInTerm3OnFirstBoot();
 
-        long heartbeatTimeout = timer.getTickForLastScheduledTask();
+        long heartbeatTimeout = getHeartbeatTimeoutTick();
         long heartbeatInterval = heartbeatTimeout - timer.getTick();
 
         // submit the command
@@ -2372,7 +2456,7 @@ public final class RaftAlgorithmTest {
 
         // now, move forward to the heartbeat
         // and check the outgoing heartbeats
-        timer.fastForward();
+        fastForwardToHeartbeat();
 
         Collection<AppendEntries> heartbeats = getRPCs(4, AppendEntries.class);
         for (AppendEntries heartbeat : heartbeats) {
@@ -2399,7 +2483,8 @@ public final class RaftAlgorithmTest {
         Collection<AppendEntries> appendEntriesRequests;
         long heartbeatInterval;
 
-        long firstHeartbeatTimeout = timer.getTickForLastScheduledTask();
+        // get the time till the first heartbeat timeout
+        long firstHeartbeatTimeout = getHeartbeatTimeoutTick();
         heartbeatInterval = firstHeartbeatTimeout - timer.getTick();
 
         UnitTestCommand command1 = new UnitTestCommand();
@@ -2420,15 +2505,16 @@ public final class RaftAlgorithmTest {
         assertThatNoMoreRPCsWereSent();
 
         // --- FIRST HEARTBEAT TRIGGERS
-        timer.fastForward();
+        fastForwardToHeartbeat();
 
-        assertThatTermAndCommitIndexHaveValues(3, 1);
-
-        long secondHeartbeatTimeout = timer.getTickForLastScheduledTask();
+        // get the time till the second heartbeat timeout
+        long secondHeartbeatTimeout = getHeartbeatTimeoutTick();
         assertThat(secondHeartbeatTimeout, greaterThanOrEqualTo(firstHeartbeatTimeout));
+        assertThat(secondHeartbeatTimeout, equalTo(timer.getTick() + RaftConstants.HEARTBEAT_INTERVAL));
 
         heartbeatInterval = secondHeartbeatTimeout - timer.getTick();
 
+        // verify the heartbeat messages going out
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries heartbeat : appendEntriesRequests) {
             if (heartbeat.server.equals(S_01)) {
@@ -2439,6 +2525,7 @@ public final class RaftAlgorithmTest {
         }
         assertThatNoMoreRPCsWereSent();
 
+        // check that our state hasn't changed after the heartbeat
         assertThatTermAndCommitIndexHaveValues(3, 1);
 
         // move time forward just a bit, but not enough to trigger another heartbeat
@@ -2447,6 +2534,7 @@ public final class RaftAlgorithmTest {
         // --- COMMAND 2
         algorithm.submitCommand(command2);
 
+        // verify the append entries messages going out
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_01)) {
@@ -2462,15 +2550,18 @@ public final class RaftAlgorithmTest {
         assertThatNoMoreRPCsWereSent();
 
         // --- SECOND HEARTBEAT TRIGGERS
-        timer.fastForward();
+        fastForwardToHeartbeat();
 
         assertThatTermAndCommitIndexHaveValues(3, 1);
 
-        long thirdHeartbeatTimeout = timer.getTickForLastScheduledTask();
+        // get the time till the third heartbeat timeout
+        long thirdHeartbeatTimeout = getHeartbeatTimeoutTick();
         assertThat(thirdHeartbeatTimeout, greaterThanOrEqualTo(secondHeartbeatTimeout));
+        assertThat(thirdHeartbeatTimeout, equalTo(timer.getTick() + RaftConstants.HEARTBEAT_INTERVAL));
 
         heartbeatInterval = thirdHeartbeatTimeout - timer.getTick();
 
+        // verify the heartbeat messages going out
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_01)) {
@@ -2485,6 +2576,9 @@ public final class RaftAlgorithmTest {
         }
         assertThatNoMoreRPCsWereSent();
 
+        // check that our state hasn't changed after the heartbeat
+        assertThatTermAndCommitIndexHaveValues(3, 1);
+
         // --- S_03 responds
         timer.fastForward(heartbeatInterval / 4);
 
@@ -2493,7 +2587,7 @@ public final class RaftAlgorithmTest {
 
         // we can commit command1 now because 3 people in the cluster support it
         assertThatTermAndCommitIndexHaveValues(3, 2);
-        verify(listener).applyCommand(2, command1);
+        verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(2, command1)));
 
         // --- S_04 responds
         timer.fastForward(heartbeatInterval / 4);
@@ -2505,13 +2599,16 @@ public final class RaftAlgorithmTest {
         assertThatNoMoreRPCsWereSent();
 
         // --- THIRD HEARTBEAT TRIGGERS
-        timer.fastForward();
+        fastForwardToHeartbeat();
 
         assertThatTermAndCommitIndexHaveValues(3, 2);
 
-        long fourthHeartbeatTimeout = timer.getTickForLastScheduledTask();
+        // get the time till the fourth heartbeat timeout
+        long fourthHeartbeatTimeout = getHeartbeatTimeoutTick();
         assertThat(fourthHeartbeatTimeout, greaterThanOrEqualTo(thirdHeartbeatTimeout));
+        assertThat(fourthHeartbeatTimeout, equalTo(timer.getTick() + RaftConstants.HEARTBEAT_INTERVAL));
 
+        // verify the heartbeat messages going out
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_01) || appendEntries.server.equals(S_03)) {
@@ -2549,7 +2646,7 @@ public final class RaftAlgorithmTest {
         UnitTestCommand command2 = new UnitTestCommand();
 
         // get the heartbeat timeout
-        long heartbeatTimeout = timer.getTickForLastScheduledTask();
+        long heartbeatTimeout = getHeartbeatTimeoutTick();
         long heartbeatInterval = heartbeatTimeout - timer.getTick();
 
         // submit a command
@@ -2566,7 +2663,7 @@ public final class RaftAlgorithmTest {
         algorithm.onAppendEntriesReply(S_02, 3, 1, 1, true);
 
         assertThatTermAndCommitIndexHaveValues(3, 2);
-        verify(listener, times(1)).applyCommand(2, command1);
+        verify(listener, times(1)).applyCommitted(argThat(isCommittedCommandAtIndex(2, command1)));
 
         // move time forward a bit more
         timer.fastForward(heartbeatInterval / 3);
@@ -2671,7 +2768,7 @@ public final class RaftAlgorithmTest {
         // verify that we've still got a valid heartbeat scheduled
         // since we haven't moved time at all, the timer's tick is sitting at 0
         // so the scheduled heartbeat is at (currentTick (0) + HEARTBEAT_INTERVAL)
-        long heartbeatTimeout = timer.getTickForLastScheduledTask();
+        long heartbeatTimeout = getHeartbeatTimeoutTick();
         assertThat(heartbeatTimeout, equalTo((long) RaftConstants.HEARTBEAT_INTERVAL));
     }
 
@@ -2770,7 +2867,7 @@ public final class RaftAlgorithmTest {
         Collection<AppendEntries> heartbeats;
 
         // move to the heartbeat timeout and check the heartbeats
-        timer.fastForward();
+        fastForwardToHeartbeat();
         heartbeats = getRPCs(4, AppendEntries.class);
         assertThatAppendEntriesHaveValues(heartbeats,
                 3, 2, 1, 1,
@@ -2781,7 +2878,7 @@ public final class RaftAlgorithmTest {
         );
         assertThatNoMoreRPCsWereSent();
 
-        long heartbeatTimeout = timer.getTickForLastScheduledTask();
+        long heartbeatTimeout = getHeartbeatTimeoutTick();
         long heartbeatInterval = heartbeatTimeout - timer.getTick();
 
         // move time forward a bit and get a response
@@ -2789,7 +2886,7 @@ public final class RaftAlgorithmTest {
         algorithm.onAppendEntriesReply(S_02, 3, 1, 2, true); // applied a couple of entries
 
         // move forward to the heartbeat timeout
-        timer.fastForward();
+        fastForwardToHeartbeat();
         heartbeats = getRPCs(4, AppendEntries.class);
         for (AppendEntries heartbeat : heartbeats) {
             if (heartbeat.server.equals(S_02)) { // nextIndex should have moved up
@@ -2898,7 +2995,7 @@ public final class RaftAlgorithmTest {
     public void shouldStepDownAsLeaderIfReceiveAnAppendEntriesReplyWithAHigherTerm() throws RPCException, StorageException, NotLeaderException {
         becomeLeaderInTerm3OnFirstBoot();
 
-        long heartbeatTimeout = timer.getTickForLastScheduledTask();
+        long heartbeatTimeout = getHeartbeatTimeoutTick();
         long heartbeatInterval = heartbeatTimeout - timer.getTick();
 
         // submit a new command
@@ -3211,10 +3308,13 @@ public final class RaftAlgorithmTest {
         algorithm.becomeLeader(term);
         assertThatSelfTransitionedToLeader(term, commitIndex);
 
+        // drain out any NOOPs sent on being a leader (if necessary)
         if (drainIAmLeaderNOOPs) {
             // TODO (AG): should I check the NOOPs to see if they're correct?
             sender.drainSentRPCs();
         }
+
+        // IMPORTANT: we _do not_ receive AppendEntriesReply messages committing our NOOP!
     }
 
     // NOTE: This test is a simple extension of the test above, with an additional step for another delayed message
@@ -3385,8 +3485,8 @@ public final class RaftAlgorithmTest {
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_04, 3, 0, 3, true);
         assertThatNoMoreRPCsWereSent();
 
-        // get the current election timeout
-        long electionTimeout = timer.getTickForLastScheduledTask();
+        // get the tick just before we receive the delayed AppendEntries
+        long preAppendEntriesElectionTimeout = getElectionTimeoutTick();
 
         // now, move time forward by _1_ tick (this will make it easy to check if we changed our election timeout)
         timer.fastForward(1);
@@ -3414,7 +3514,8 @@ public final class RaftAlgorithmTest {
         verify(log, times(1)).put(eq(NOOP(3, 3)));
 
         // and, we've bumped our election timeout
-        assertThat(timer.getTickForLastScheduledTask(), equalTo(electionTimeout + 1)); // old election timeout, plus the 1 tick we advanced
+        long postAppendEntriesElectionTimeout = getElectionTimeoutTick();
+        assertThat(postAppendEntriesElectionTimeout, equalTo(preAppendEntriesElectionTimeout + 1)); // old election timeout, plus the 1 tick we advanced
 
         // and check that we're in a good final state
         assertThatLogContains(
@@ -3459,7 +3560,8 @@ public final class RaftAlgorithmTest {
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_04, 3, 0, 3, true);
         assertThatNoMoreRPCsWereSent();
 
-        long electionTimeout = timer.getTickForLastScheduledTask();
+        // get the election timeout just before we receive the duplicate AppendEntries
+        long preAppendEntriesElectionTimeout = getElectionTimeoutTick();
 
         // now, move time forward by _1_ tick (this will make it easy to check if we changed our election timeout)
         timer.fastForward(1);
@@ -3489,7 +3591,8 @@ public final class RaftAlgorithmTest {
         verify(log, times(1)).put(eq(NOOP(3, 3)));
 
         // and, we've bumped our election timeout
-        assertThat(timer.getTickForLastScheduledTask(), equalTo(electionTimeout + 1)); // old election timeout, plus the 1 tick we advanced
+        long postAppendEntriesElectionTimeout = getElectionTimeoutTick();
+        assertThat(postAppendEntriesElectionTimeout, equalTo(preAppendEntriesElectionTimeout + 1)); // old election timeout, plus the 1 tick we advanced
 
         // and check that we're in a good final state
         assertThatLogContains(
@@ -3534,7 +3637,8 @@ public final class RaftAlgorithmTest {
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_04, 3, 0, 3, true);
         assertThatNoMoreRPCsWereSent();
 
-        long electionTimeout = timer.getTickForLastScheduledTask();
+        // get the tick just before we receive the duplicate AppendEntries
+        long preAppendEntriesElectionTimeout = getElectionTimeoutTick();
 
         // now, move time forward by _1_ tick (this will make it easy to check if we changed our election timeout)
         timer.fastForward(1);
@@ -3564,7 +3668,8 @@ public final class RaftAlgorithmTest {
         verify(log, times(1)).put(eq(NOOP(3, 3)));
 
         // and, we've bumped our election timeout
-        assertThat(timer.getTickForLastScheduledTask(), equalTo(electionTimeout + 1)); // old election timeout, plus the 1 tick we advanced
+        long postAppendEntriesElectionTimeout = getElectionTimeoutTick();
+        assertThat(postAppendEntriesElectionTimeout, equalTo(preAppendEntriesElectionTimeout + 1)); // old election timeout, plus the 1 tick we advanced
 
         // and check that we're in a good final state
         assertThatLogContains(
@@ -3609,7 +3714,8 @@ public final class RaftAlgorithmTest {
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_04, 3, 0, 3, true);
         assertThatNoMoreRPCsWereSent();
 
-        long electionTimeoutTick = timer.getTickForLastScheduledTask();
+        // get the tick just before we receive the AppendEntries message
+        long preAppendEntriesElectionTimeout = getElectionTimeoutTick();
 
         // now, move time forward by _1_ tick (this will make it easy to check if we changed our election timeout)
         timer.fastForward(1);
@@ -3640,7 +3746,8 @@ public final class RaftAlgorithmTest {
         verify(log, times(1)).put(eq(NOOP(3, 3)));
 
         // and, we've bumped our election timeout
-        assertThat(timer.getTickForLastScheduledTask(), equalTo(electionTimeoutTick + 1)); // old election timeout, plus the 1 tick we advanced
+        long postAppendEntriesElectionTimeout = getElectionTimeoutTick();
+        assertThat(postAppendEntriesElectionTimeout, equalTo(preAppendEntriesElectionTimeout + 1)); // old election timeout, plus the 1 tick we advanced
 
         // and check that we're in a good final state
         assertThatLogContains(
@@ -3742,7 +3849,7 @@ public final class RaftAlgorithmTest {
                 NOOP(1, 1),
                 NOOP(2, 1),
                 CLIENT(3, 1, command1),
-                CLIENT(4, 1, command2),
+                CLIENT(4, 1, command2), // <----- committed up till here
                 CLIENT(5, 1, command3),
                 CLIENT(6, 2, command4),
                 CLIENT(7, 2, command5),
@@ -3808,11 +3915,11 @@ public final class RaftAlgorithmTest {
 
         // and that we've notified our listener
         InOrder notificationOrder = inOrder(listener);
-        notificationOrder.verify(listener).applyCommand(5, command3);
-        notificationOrder.verify(listener).applyCommand(6, command4);
-        notificationOrder.verify(listener).applyCommand(7, command5);
-        notificationOrder.verify(listener).applyCommand(8, command6);
-        notificationOrder.verify(listener).applyCommand(9, command7);
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(5, command3)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(6, command4)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(7, command5)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(8, command6)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(9, command7)));
         notificationOrder.verifyNoMoreInteractions();
 
         // check the logs (nothing should have changed)
@@ -3844,7 +3951,7 @@ public final class RaftAlgorithmTest {
         assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 1, 3, CLIENT(2, 3, command));
         assertThatNoMoreRPCsWereSent();
 
-        long heartbeatTimeout = timer.getTickForLastScheduledTask();
+        long heartbeatTimeout = getHeartbeatTimeoutTick();
         long heartbeatInterval = heartbeatTimeout - timer.getTick();
 
         // achieve quorum for this command
@@ -3854,7 +3961,7 @@ public final class RaftAlgorithmTest {
 
         // verify that we've notified the listener and bumped the commitIndex
         assertThatTermAndCommitIndexHaveValues(3, 2);
-        verify(listener, times(1)).applyCommand(2, command);
+        verify(listener, times(1)).applyCommitted(argThat(isCommittedCommandAtIndex(2, command)));
 
         // after some time we get another response
         // but...should not notify the client
@@ -3899,7 +4006,7 @@ public final class RaftAlgorithmTest {
         Collection<AppendEntries> appendEntriesRequests;
 
         // move to the heartbeat timeout
-        timer.fastForward();
+        fastForwardToHeartbeat();
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         assertThatAppendEntriesHaveValues(
                 appendEntriesRequests,
@@ -3910,7 +4017,7 @@ public final class RaftAlgorithmTest {
         );
         assertThatNoMoreRPCsWereSent();
 
-        long heartbeatTimeout = timer.getTickForLastScheduledTask();
+        long heartbeatTimeout = getHeartbeatTimeoutTick();
         long heartbeatInterval = heartbeatTimeout - timer.getTick();
 
         // move forward and get a bunch of duplicate responses
@@ -3920,7 +4027,7 @@ public final class RaftAlgorithmTest {
         algorithm.onAppendEntriesReply(S_03, 3, 1, 3, true);
 
         // now, move forward to the next heartbeat
-        timer.fastForward();
+        fastForwardToHeartbeat();
 
         // nothing should have changed
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
@@ -3992,7 +4099,8 @@ public final class RaftAlgorithmTest {
         // bumped the commitIndex, triggered the future, and notified the listeners
         assertThatTermAndCommitIndexHaveValues(3, 2);
         assertThat(commandFuture.isDone(), equalTo(true));
-        verify(listener, times(1)).applyCommand(2, command);
+        verify(listener, times(1)).applyCommitted(argThat(isCommittedCommandAtIndex(2, command)));
+        verifyNoMoreInteractions(listener);
 
         // check final state
         assertThatLogContains(
@@ -4072,11 +4180,15 @@ public final class RaftAlgorithmTest {
         assertThat(commandFuture5.isDone(), equalTo(true));
 
         InOrder notificationOrder = inOrder(listener);
-        notificationOrder.verify(listener).applyCommand(2, command1);
-        notificationOrder.verify(listener).applyCommand(3, command2);
-        notificationOrder.verify(listener).applyCommand(6, command3);
-        notificationOrder.verify(listener).applyCommand(7, command4);
-        notificationOrder.verify(listener).applyCommand(9, command5);
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(2, command1)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(3, command2)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(4)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(5)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(6, command3)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(7, command4)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(8)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(9, command5)));
+        notificationOrder.verifyNoMoreInteractions();
 
         // check final state
         assertThatLogContains(
@@ -4132,7 +4244,7 @@ public final class RaftAlgorithmTest {
         sender.drainSentRPCs();
 
         // move to the heartbeat timeout
-        timer.fastForward();
+        fastForwardToHeartbeat();
         Collection<AppendEntries> heartbeats = getRPCs(4, AppendEntries.class);
         assertThatAppendEntriesHaveValues(
                 heartbeats,
@@ -4193,9 +4305,11 @@ public final class RaftAlgorithmTest {
 
         // check that the listener was notified (this is independent of the fact that the command futures were all tripped to false!)
         InOrder notificationOrder = inOrder(listener);
-        notificationOrder.verify(listener).applyCommand(2, command1);
-        notificationOrder.verify(listener).applyCommand(3, command2);
-        notificationOrder.verify(listener).applyCommand(5, command3);
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(2, command1)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(3, command2)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(4)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(5, command3)));
+        notificationOrder.verify(listener).applyCommitted(argThat(isSkipAtIndex(6)));
         notificationOrder.verifyNoMoreInteractions();
 
         // verify that the final state looks good
@@ -4213,94 +4327,33 @@ public final class RaftAlgorithmTest {
 
     //================================================================================================================//
     //
-    // Command Loading Tests
+    // Committed Loading Tests
     //
     //================================================================================================================//
 
+    // generally we want to check the following:
+    // - bounds violations
+    // - indexToSearchFrom = 0
+    // - indexToSearchFrom at arbitrary position < lastLogEntry
+    // - indexToSearchFrom = end
+    //
+    // for all of these tests:
+    // - don't have to start raftAlgorithm for this to work
+    // - don't have to be leader
+    // - it doesn't matter what the current term is
+    // - it _only_ matters what the commitIndex is, and that the log has entries or a snapshot exists
+
     @Test
-    public void shouldReturnCorrectSequenceOfCommandsInResponseToRepeatedGetNextCommittedCommandCalls() throws Exception {
-        LogEntry.ClientEntry[] unappliedCommittedClientEntries = new LogEntry.ClientEntry[] {
-                CLIENT(4, 1, new UnitTestCommand()),
-                CLIENT(6, 2, new UnitTestCommand()),
-                CLIENT(8, 3, new UnitTestCommand()),
-                CLIENT(9, 3, new UnitTestCommand()),
-                CLIENT(10, 3, new UnitTestCommand()),
-        };
+    public void shouldThrowIllegalArgumentExceptionIfCallerSpecifiesIndexLessThanZero() {
+        // standard log is fine
 
-        // starting state before the calls to "getNextCommittedCommand"
-        final long commitIndex = 10;
-        final LogEntry[] entries = new LogEntry[] {
-                SENTINEL(),
-                NOOP(1, 1),
-                NOOP(2, 1),
-                CLIENT(3, 1, new UnitTestCommand()), // <--- applied this command (but nothing after!)
-                unappliedCommittedClientEntries[0],
-                NOOP(5, 2),
-                unappliedCommittedClientEntries[1],
-                NOOP(7, 3),
-                unappliedCommittedClientEntries[2],
-                unappliedCommittedClientEntries[3],
-                unappliedCommittedClientEntries[4], // <--- only committed up to here!
-                CLIENT(11, 3, new UnitTestCommand()), // <--- uncommitted from this point on
-                CLIENT(12, 3, new UnitTestCommand()),
-                CLIENT(13, 3, new UnitTestCommand()),
-                CLIENT(14, 3, new UnitTestCommand())
-        };
-
-        // start off with the log defined above
-        insertIntoLog(entries);
-
-        // IMPORTANT:
-        // - don't have to start raftAlgorithm for this to work
-        // - don't have to be leader
-        // - it doesn't matter what the current term is
-        // - it _only_ matters what the commitIndex is, and that the log has entries
-
-        store.setCommitIndex(commitIndex);
-
-        CommittedCommand returned;
-        long lastAppliedCommandIndex = 3;
-        int commandsIndex = 0;
-        while (true) {
-            returned = algorithm.getNextCommittedCommand(lastAppliedCommandIndex);
-
-            if (returned == null) {
-                // once you get to the commitIndex you should be informed that
-                // there are no more operations that you can apply
-                assertThat(lastAppliedCommandIndex, equalTo(commitIndex));
-                break;
-            }
-
-            assertThat(lastAppliedCommandIndex, lessThan(commitIndex));
-
-            assertThat(returned.getIndex(), equalTo(unappliedCommittedClientEntries[commandsIndex].getIndex()));
-            assertThat(returned.getCommand(), equalTo(unappliedCommittedClientEntries[commandsIndex].getCommand()));
-
-            lastAppliedCommandIndex = returned.getIndex();
-            commandsIndex++;
-        }
-
-        // should only have applied the commands up to the commitIndex, nothing more
-        assertThat(lastAppliedCommandIndex, equalTo(commitIndex));
-
-        // log should end with exactly the same entries
-        assertThatLogContains(entries);
-        assertThat(store.getCommitIndex(), equalTo(commitIndex));
+        // when you make the call with a -'ve number it should fail immediately
+        expectedException.expect(IllegalArgumentException.class);
+        algorithm.getNextCommitted(-1);
     }
 
     @Test
-    public void shouldReturnNoUnappliedEntriesIfTheLogIsEmpty() throws Exception {
-        insertIntoLog(SENTINEL());
-        store.setCommitIndex(0);
-
-        assertThat(algorithm.getNextCommittedCommand(0), nullValue());
-
-        assertThatLogContainsOnlySentinel();
-        assertThat(store.getCommitIndex(), equalTo(0L));
-    }
-
-    @Test
-    public void shouldThrowIllegalArgumentExceptionIfCallerSpecifiesIndexGreaterThanCommitIndexInCallToGetNextCommittedCommand() throws Exception {
+    public void shouldThrowIllegalArgumentExceptionIfCallerSpecifiesIndexGreaterThanCommitIndexInCallToGetNextCommitted() throws Exception {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 NOOP(1, 1),
@@ -4310,10 +4363,12 @@ public final class RaftAlgorithmTest {
                 CLIENT(5, 1, new UnitTestCommand()),
                 CLIENT(6, 1, new UnitTestCommand())
         };
+        final long currentTerm = 1;
         final long commitIndex = 3;
 
         // setup the starting state
         insertIntoLog(entries);
+        store.setCurrentTerm(currentTerm);
         store.setCommitIndex(commitIndex);
 
         IllegalArgumentException callException = null;
@@ -4325,7 +4380,7 @@ public final class RaftAlgorithmTest {
             assertThat(callerLastAppliedCommandIndex, lessThanOrEqualTo((long) entries.length - 1));
 
             // make the call
-            algorithm.getNextCommittedCommand(callerLastAppliedCommandIndex);
+            algorithm.getNextCommitted(callerLastAppliedCommandIndex);
         } catch (IllegalArgumentException e) {
             callException = e;
         }
@@ -4334,11 +4389,11 @@ public final class RaftAlgorithmTest {
 
         // verify that the state hasn't changed
         assertThatLogContains(entries);
-        assertThat(store.getCommitIndex(), equalTo(commitIndex));
+        assertThatTermAndCommitIndexHaveValues(currentTerm, commitIndex);
     }
 
     @Test
-    public void shouldThrowIllegalArgumentExceptionIfCallerSpecifiesIndexGreaterThanLastLogIndexInCallToGetNextCommittedCommand() throws Exception {
+    public void shouldThrowIllegalArgumentExceptionIfCallerSpecifiesIndexGreaterThanLastLogIndexInCallToGetNextCommitted() throws Exception {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 NOOP(1, 1),
@@ -4348,16 +4403,30 @@ public final class RaftAlgorithmTest {
                 CLIENT(5, 1, new UnitTestCommand()),
                 CLIENT(6, 1, new UnitTestCommand())  // <-- committed until here (i.e. _everything_ is committed)
         };
+        final long currentTerm = 2;
         final long commitIndex = entries.length - 1;
 
         // setup the starting state
         insertIntoLog(entries);
+        store.setCurrentTerm(currentTerm);
         store.setCommitIndex(commitIndex);
+
+        //
+        // situation is as follows:
+        //
+        //                                    +----------- COMMITTED
+        //                                    V
+        //   ------------------------------------
+        //   | 00 | 01 | 02 | 03 | 04 | 05 | 06 | (LOG)
+        //   -----------------------------------
+        //                                         ^
+        //                                         +----------- INDEX TO SEARCH FROM = 7
+        //
 
         IllegalArgumentException callException = null;
 
         try {
-            algorithm.getNextCommittedCommand(entries.length); // the caller is acting as if it got an entry at lastLogIndex + 1
+            algorithm.getNextCommitted(entries.length); // the caller is acting as if it got an entry at lastLogIndex + 1
         } catch (IllegalArgumentException e) {
             callException = e;
         }
@@ -4366,7 +4435,836 @@ public final class RaftAlgorithmTest {
 
         // verify that the state hasn't changed
         assertThatLogContains(entries);
-        assertThat(store.getCommitIndex(), equalTo(commitIndex));
+        assertThatTermAndCommitIndexHaveValues(currentTerm, commitIndex);
+    }
+
+    @Test
+    public void shouldThrowIllegalArgumentExceptionIfCallerSpecifiesIndexGreaterThanLastAppliedIndexInSnapshotInCallToGetNextCommitted() throws Exception {
+        // we have a snapshot that contains data to index 6 (inclusive)
+        long lastAppliedIndex = 6;
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(lastAppliedIndex, 2);
+
+        // our log is empty
+        clearLog(); // clear out the log completely - we don't even want the sentinel
+
+        // set the term
+        long currentTerm = 2;
+        store.setCurrentTerm(currentTerm); // has to be >= snapshot term
+        // set the committed index
+        store.setCommitIndex(lastAppliedIndex);
+
+        // have the snapshot store return the snapshot
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
+
+        //
+        // situation is as follows:
+        //
+        //                   +----------- COMMITTED = 6
+        //                   V
+        //   ---------------------
+        //  | LAST APPLIED = 6   | (SNAPSHOT)
+        //  ---------------------
+        //                          ^
+        //                          +----------- INDEX TO SEARCH FROM = 7
+        //
+
+        IllegalArgumentException callException = null;
+        try {
+            algorithm.getNextCommitted(lastAppliedIndex + 1); // the caller is acting as if it got some entry after the end of the snapshot
+        } catch (IllegalArgumentException e) {
+            callException = e;
+        }
+
+        assertThat(callException, notNullValue());
+
+        // verify that the state hasn't changed
+        assertThatLogIsEmpty();
+        assertThatTermAndCommitIndexHaveValues(currentTerm, lastAppliedIndex);
+    }
+
+    // log and snapshot
+    // we do have overlap for some entries
+    // initial indexToSearchFrom is after the end of the log
+    @Test
+    public void shouldThrowIllegalArgumentExceptionIfCallerSpecifiesIndexGreaterThanLastLogIndexInCallToGetNextCommittedAndBothLogAndSnapshotExist() throws Exception {
+        // we have a snapshot that contains data to index 9 (inclusive)
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(9L, 2);
+
+        // we have a log that contains entries from index 7 onwards
+        LogEntry unappliedEntry0 = CLIENT(7, 2, new UnitTestCommand());
+        LogEntry unAppliedEntry1 = NOOP(8, 2);
+        LogEntry unappliedEntry2 = NOOP(9, 3);
+        LogEntry unappliedEntry3 = CLIENT(10, 3, new UnitTestCommand());
+        LogEntry unappliedEntry4 = CLIENT(11, 3, new UnitTestCommand());
+        final LogEntry[] entries = new LogEntry[] {
+                unappliedEntry0,
+                unAppliedEntry1,
+                unappliedEntry2,
+                unappliedEntry3,
+                unappliedEntry4, // <------ we've committed up to here
+                CLIENT(12, 3, new UnitTestCommand())
+        };
+        clearLog(); // clear out the log completely - we don't even want the sentinel
+        insertIntoLog(entries);
+
+        // set the current term
+        long currentTerm = 3;
+        store.setCurrentTerm(currentTerm);
+
+        // set the committed index
+        long commitIndex = 11;
+        store.setCommitIndex(commitIndex);
+
+        // have the snapshot store return the snapshot
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
+
+        //
+        // situation is as follows:
+        //
+        //                                             +----------- COMMITTED
+        //                                             V
+        //                       ------------------------------
+        //    .... EMPTY ....   | 07 | 08 | 09 | 10 | 11 | 12 | (LOG)
+        //                      ------------------------------
+        //  ------------------------------------
+        // |         LAST APPLIED = 9          | (SNAPSHOT)
+        // ------------------------------------
+        //                                                      ^
+        //                                                      +----------- INDEX TO SEARCH FROM = 13
+        //
+
+        IllegalArgumentException callException = null;
+        try {
+            algorithm.getNextCommitted(entries[entries.length - 1].getIndex() + 1); // the caller is acting as if it got some entry after the end of the log
+        } catch (IllegalArgumentException e) {
+            callException = e;
+        }
+
+        assertThat(callException, notNullValue());
+
+        // verify that the state hasn't changed
+        assertThatLogContains(entries);
+        assertThatTermAndCommitIndexHaveValues(currentTerm, commitIndex);
+    }
+
+    // empty case
+    @Test
+    public void shouldReturnNoUnappliedEntriesIfTheLogIsEmptyAndThereAreNoSnapshots() throws Exception {
+        insertIntoLog(SENTINEL());
+        store.setCommitIndex(0);
+
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(null);
+
+        assertThat(algorithm.getNextCommitted(0), nullValue());
+
+        assertThatLogContainsOnlySentinel();
+        assertThatTermAndCommitIndexHaveValues(0, 0);
+    }
+
+    // log only
+    // indexToSearchFrom starts at 0
+    @Test
+    public void shouldReturnCorrectSequenceOfCommittedInstancesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromAsZero() throws Exception {
+        LogEntry unappliedEntries[] = {
+                NOOP(1, 1),
+                CLIENT(2, 1, new UnitTestCommand()),
+                CLIENT(3, 1, new UnitTestCommand()),
+                CLIENT(4, 1, new UnitTestCommand()),
+        };
+
+        // starting state before the calls to "getNextCommitted"
+        final long commitIndex = 4;
+        final LogEntry[] entries = new LogEntry[] {
+                SENTINEL(),
+                unappliedEntries[0],
+                unappliedEntries[1],
+                unappliedEntries[2],
+                unappliedEntries[3],                 // <--- only committed up to here
+                CLIENT(5, 1, new UnitTestCommand()), // <--- uncommitted from this point on
+        };
+        insertIntoLog(entries);
+        store.setCommitIndex(commitIndex);
+
+        // set the term
+        // it shouldn't matter if the current term > last term in the log
+        long currentTerm = 3;
+        store.setCurrentTerm(currentTerm);
+
+        //
+        // situation is as follows:
+        //
+        //                       +----------- COMMITTED
+        //                       V
+        // -------------------------------
+        // | 00 | 01 | 02 | 03 | 04 | 05 | (LOG)
+        // ------------------------------
+        //   ^
+        //   +----------- INDEX TO SEARCH FROM
+        //
+
+        // check that all the log entries were returned correctly
+        checkCorrectSequenceOfLogEntriesReturnedForRepeatedGetNextCommittedCalls(0, unappliedEntries);
+
+        // we should not have changed the internal state of the algorithm
+        assertThatLogContains(entries);
+        assertThatTermAndCommitIndexHaveValues(currentTerm, commitIndex);
+    }
+
+    // log only
+    // indexToSearchFrom starts in the middle of the log
+    @Test
+    public void shouldReturnCorrectSequenceOfCommittedInstancesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromInMiddleOfLog() throws Exception {
+        LogEntry unappliedEntries[] = {
+                CLIENT(4, 1, new UnitTestCommand()),
+                NOOP(5, 2),
+                CLIENT(6, 2, new UnitTestCommand()),
+                NOOP(7, 3),
+                CLIENT(8, 3, new UnitTestCommand()),
+                CLIENT(9, 3, new UnitTestCommand()),
+                CLIENT(10, 3, new UnitTestCommand()),
+        };
+
+        // starting state before the calls to "getNextCommitted"
+        final long commitIndex = 10;
+        final LogEntry[] entries = new LogEntry[] {
+                SENTINEL(),
+                NOOP(1, 1),
+                NOOP(2, 1),
+                CLIENT(3, 1, new UnitTestCommand()),  // <--- applied this command (but nothing after!)
+                unappliedEntries[0],
+                unappliedEntries[1],
+                unappliedEntries[2],
+                unappliedEntries[3],
+                unappliedEntries[4],
+                unappliedEntries[5],
+                unappliedEntries[6],                  // <--- only committed up to here!
+                CLIENT(11, 3, new UnitTestCommand()), // <--- uncommitted from this point on
+                CLIENT(12, 3, new UnitTestCommand()),
+                CLIENT(13, 3, new UnitTestCommand()),
+                CLIENT(14, 3, new UnitTestCommand())
+        };
+        insertIntoLog(entries);
+        store.setCommitIndex(commitIndex);
+
+        // set the current term
+        // again, shouldn't matter that the term is >= the one in the logs
+        long currentTerm = 3;
+        store.setCurrentTerm(currentTerm);
+
+        //
+        // situation is as follows:
+        //
+        //                                                      +----------- COMMITTED
+        //                                                      V
+        // ----------------------------------------------------------------------------
+        // | 00 | 01 | 02 | 03 | 04 | 05 | 06 | 07 | 08 | 09 | 10 | 11 | 12 | 13 | 14 | (LOG)
+        // ---------------------------------------------------------------------------
+        //                  ^
+        //                  +----------- INDEX TO SEARCH FROM
+        //
+
+        // we're going to start at index 3 and verify that all log entries from (3 -> 10]
+        checkCorrectSequenceOfLogEntriesReturnedForRepeatedGetNextCommittedCalls(3, unappliedEntries);
+
+        // the algorithm internal state should not have changed
+        assertThatLogContains(entries);
+        assertThatTermAndCommitIndexHaveValues(currentTerm, commitIndex);
+    }
+
+    // snapshot only
+    // initial indexToSearchFrom is 0
+    @Test
+    public void shouldReturnSnapshotInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromAsZero() throws Exception {
+        // we have a snapshot that contains data to index 6 (inclusive)
+        int lastAppliedTerm = 2;
+        long lastAppliedIndex = 6;
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(lastAppliedIndex, lastAppliedTerm);
+
+        // our log is empty
+        clearLog(); // clear out the log completely - we don't even want the sentinel
+
+        // set the committed index
+        store.setCommitIndex(lastAppliedIndex);
+
+        // set the current term
+        // this has to be >= the term in the snapshot
+        store.setCurrentTerm(lastAppliedTerm);
+
+        // have the snapshot store return the snapshot
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
+
+        //
+        // situation is as follows:
+        //
+        //                   +----------- COMMITTED = 6
+        //                   V
+        //   ---------------------
+        //  | LAST APPLIED = 6   | (SNAPSHOT)
+        //  ---------------------
+        //   ^
+        //   +----------- INDEX TO SEARCH FROM = 0
+        //
+
+        Committed committed;
+
+        // OK, now, let's start by saying that the last index we applied was '0' (IOW, we have no state and have to start from scratch)
+        // we should get the snapshot back
+        committed = algorithm.getNextCommitted(0);
+        checkMatchingSnapshot(committed, storedSnapshot);
+
+        // if we make a second call we should get nothing
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 7
+        assertThat(committed, nullValue());
+
+        // algorithm should have exactly the same state at the end
+        assertThatLogIsEmpty();
+        assertThatTermAndCommitIndexHaveValues(lastAppliedTerm, lastAppliedIndex);
+    }
+
+    // snapshot only
+    // initial indexToSearchFrom is before the end of the snapshot
+    @Test
+    public void shouldReturnSnapshotInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromIsBeforeLastAppliedIndexInSnapshot() throws Exception {
+        // we have a snapshot that contains data to index 6 (inclusive)
+        long lastAppliedTerm = 2;
+        long lastAppliedIndex = 6;
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(lastAppliedIndex, lastAppliedTerm);
+
+        // our log is empty
+        clearLog(); // clear out the log completely - we don't even want the sentinel
+
+        // set the current term
+        // has to be >= the term in the snapshot
+        long currentTerm = lastAppliedTerm + 1;
+        store.setCurrentTerm(currentTerm);
+
+        // set the committed index
+        store.setCommitIndex(lastAppliedIndex);
+
+        // have the snapshot store return the snapshot
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
+
+        //
+        // situation is as follows:
+        //
+        //                   +----------- COMMITTED = 6
+        //                   V
+        //   ---------------------
+        //  | LAST APPLIED = 6   | (SNAPSHOT)
+        //  ---------------------
+        //          ^
+        //          +----------- INDEX TO SEARCH FROM = 3
+        //
+
+        Committed committed;
+
+        // OK, now, let's start by saying that the last index we applied was '3' (weird, but, whatever)
+        // we should get the snapshot back
+        committed = algorithm.getNextCommitted(3);
+        checkMatchingSnapshot(committed, storedSnapshot);
+
+        // if we make a second call we should get nothing
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 7
+        assertThat(committed, nullValue());
+
+        // algorithm should have exactly the same state at the end
+        assertThatLogIsEmpty();
+        assertThatTermAndCommitIndexHaveValues(currentTerm, lastAppliedIndex);
+    }
+
+    // log and snapshot
+    // no overlap
+    // initial indexToSearchFrom is 0
+    @Test
+    public void shouldReturnSnapshotFollowedByLogEntriesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromAsZero() throws Exception {
+        // we have a snapshot that contains data to index 6 (inclusive)
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot((long) 6, 2);
+
+        // we have a log that contains entries from index 7 onwards
+        LogEntry unappliedEntry0 = CLIENT(7, 2, new UnitTestCommand());
+        LogEntry unappliedEntry1 = NOOP(8, 2);
+        final LogEntry[] entries = new LogEntry[] {
+                unappliedEntry0,
+                unappliedEntry1, // <------ we've committed up to here
+                NOOP(9, 3),
+                CLIENT(10, 3, new UnitTestCommand()),
+                CLIENT(11, 3, new UnitTestCommand()),
+                CLIENT(12, 3, new UnitTestCommand())
+        };
+        clearLog(); // clear out the log completely - we don't even want the sentinel
+        insertIntoLog(entries);
+
+        // set the current term
+        long currentTerm = 8;
+        store.setCurrentTerm(currentTerm);
+
+        // set the committed index
+        long commitIndex = 8;
+        store.setCommitIndex(commitIndex);
+
+        // have the snapshot store return the snapshot
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
+
+        //
+        // situation is as follows:
+        //
+        //                                +----------- COMMITTED
+        //                                V
+        //                         ------------------------------
+        //      .... EMPTY ....   | 07 | 08 | 09 | 10 | 11 | 12 | (LOG)
+        //                        ------------------------------
+        //   ---------------------
+        //  | LAST APPLIED = 6   | (SNAPSHOT)
+        //  ---------------------
+        //   ^
+        //   +----------- INDEX TO SEARCH FROM = 0
+        //
+
+        Committed committed;
+
+        // OK, now, let's start by saying that the last index we applied was '0' (IOW, we have no state and have to start from scratch)
+        // we should get the snapshot back
+        committed = algorithm.getNextCommitted(0);
+        checkMatchingSnapshot(committed, storedSnapshot);
+
+        // let's check that if we make a second call we should get back the first committed, unapplied entry (command)
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 6
+        checkMatchingCommittedLogEntry(committed, unappliedEntry0);
+
+        // let's check that if we make a third call we should get back the second committed, unapplied entry (noop)
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 7
+        checkMatchingCommittedLogEntry(committed, unappliedEntry1);
+
+        // if we make a fourth call we should get nothing
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 8
+        assertThat(committed, nullValue());
+
+        // algorithm should have exactly the same state at the end
+        assertThatLogContains(entries);
+        assertThatTermAndCommitIndexHaveValues(currentTerm, commitIndex);
+    }
+
+    // log and snapshot
+    // no overlap
+    // initial indexToSearchFrom is after the end of the snapshot and before the last committed entry in the log
+    @Test
+    public void shouldReturnLogEntriesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromNonZeroAndAfterTheLastAppliedIndexInTheSnapshot() throws Exception {
+        // we have a snapshot that contains data to index 6 (inclusive)
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 2);
+
+        // we have a log that contains entries from index 7 onwards
+        LogEntry unappliedEntry0 = NOOP(8, 2);
+        LogEntry unappliedEntry1 = CLIENT(9, 2, new UnitTestCommand());
+        final LogEntry[] entries = new LogEntry[] {
+                CLIENT(7, 2, new UnitTestCommand()),
+                unappliedEntry0,
+                unappliedEntry1, // <------ we've committed up to here
+                CLIENT(10, 3, new UnitTestCommand()),
+                CLIENT(11, 3, new UnitTestCommand()),
+                CLIENT(12, 3, new UnitTestCommand())
+        };
+        clearLog(); // clear out the log completely - we don't even want the sentinel
+        insertIntoLog(entries);
+
+        // set the current term
+        long currentTerm = 3;
+        store.setCurrentTerm(currentTerm);
+
+        // set the committed index
+        long commitIndex = 9;
+        store.setCommitIndex(commitIndex);
+
+        // have the snapshot store return the snapshot
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
+
+        //
+        // situation is as follows:
+        //
+        //                                     +----------- COMMITTED
+        //                                     V
+        //                         ------------------------------
+        //      .... EMPTY ....   | 07 | 08 | 09 | 10 | 11 | 12 | (LOG)
+        //                        ------------------------------
+        //   ---------------------
+        //  | LAST APPLIED = 6   | (SNAPSHOT)
+        //  ---------------------
+        //                         ^
+        //                         +----------- INDEX TO SEARCH FROM = 7
+        //
+
+        Committed committed;
+
+        // OK, now, let's start by saying that the last index we applied was '7'
+        committed = algorithm.getNextCommitted(7);
+        checkMatchingCommittedLogEntry(committed, unappliedEntry0);
+
+        // second call (should get back the client entry)
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 8
+        checkMatchingCommittedLogEntry(committed, unappliedEntry1);
+
+        // a final call (should get nothing)
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 9
+        assertThat(committed, nullValue());
+
+        // we should not have changed our internal state
+        assertThatLogContains(entries);
+        assertThatTermAndCommitIndexHaveValues(currentTerm, commitIndex);
+    }
+
+    // log and snapshot
+    // we do have overlap for some entries
+    // initial indexToSearchFrom is 0
+    @Test
+    public void shouldReturnSnapshotFollowedByLogEntriesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromAsZeroAndOverlapBetweenLogAndSnapshot() throws Exception {
+        // we have a snapshot that contains data to index 9 (inclusive)
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(9L, 2);
+
+        // we have a log that contains entries from index 7 onwards
+        LogEntry unappliedEntries[] = {
+                CLIENT(7, 2, new UnitTestCommand()),
+                NOOP(8, 2),
+                NOOP(9, 3),
+                CLIENT(10, 3, new UnitTestCommand()),
+                CLIENT(11, 3, new UnitTestCommand()),
+        };
+        final LogEntry[] entries = new LogEntry[] {
+                unappliedEntries[0],
+                unappliedEntries[1],
+                unappliedEntries[2],
+                unappliedEntries[3],
+                unappliedEntries[4], // <------ we've committed up to here
+                CLIENT(12, 3, new UnitTestCommand())
+        };
+        clearLog(); // clear out the log completely - we don't even want the sentinel
+        insertIntoLog(entries);
+
+        // set the current term
+        // shouldn't matter if it's greater than the last term in the log
+        long currentTerm = 5;
+        store.setCurrentTerm(currentTerm);
+
+        // set the committed index
+        long commitIndex = 11;
+        store.setCommitIndex(commitIndex);
+
+        // have the snapshot store return the snapshot
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
+
+        //
+        // situation is as follows:
+        //
+        //                                             +----------- COMMITTED
+        //                                             V
+        //                       ------------------------------
+        //    .... EMPTY ....   | 07 | 08 | 09 | 10 | 11 | 12 | (LOG)
+        //                      ------------------------------
+        //  ------------------------------------
+        // |         LAST APPLIED = 9          | (SNAPSHOT)
+        // ------------------------------------
+        //  ^
+        //  +----------- INDEX TO SEARCH FROM = 0
+        //
+
+        Committed committed;
+
+        // OK, now, let's start by saying that the last index we applied was '0' (IOW, we have no state and have to start from scratch)
+        // we should get the snapshot back
+        committed = algorithm.getNextCommitted(0);
+        checkMatchingSnapshot(committed, storedSnapshot);
+
+        // when we make the second call we should ignore the
+        // overlapping log region
+        // and return the first log entry with new info
+        // i.e. the entry at index 10
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 9
+        checkMatchingCommittedLogEntry(committed, unappliedEntries[3]);
+
+        // when we make the third call we should get the last committed unapplied log entry
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 10
+        checkMatchingCommittedLogEntry(committed, unappliedEntries[4]);
+
+        // if we make a fourth call we should get nothing since there are no committed unapplied entries left
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 11
+        assertThat(committed, nullValue());
+
+        // algorithm should have exactly the same state at the end
+        assertThatLogContains(entries);
+        assertThatTermAndCommitIndexHaveValues(currentTerm, commitIndex);
+    }
+
+    // log and snapshot
+    // we do have overlap for some entries
+    // similar to test above, but: initial indexToSearchFrom is before the end of the snapshot, and well before the beginning of the log
+    // _only_ the snapshot can be returned for the first call to getNextCommitted
+    @Test
+    public void shouldReturnSnapshotFollowedByLogEntriesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromNonZeroAndOverlapBetweenLogAndSnapshot() throws Exception {
+        // we have a snapshot that contains data to index 9 (inclusive)
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(9L, 2);
+
+        // we have a log that contains entries from index 7 onwards
+        LogEntry unappliedEntries[] = {
+                CLIENT(7, 2, new UnitTestCommand()),
+                NOOP(8, 2),
+                NOOP(9, 3),
+                CLIENT(10, 3, new UnitTestCommand()),
+                CLIENT(11, 3, new UnitTestCommand()),
+        };
+        final LogEntry[] entries = new LogEntry[] {
+                unappliedEntries[0],
+                unappliedEntries[1],
+                unappliedEntries[2],
+                unappliedEntries[3],
+                unappliedEntries[4], // <------ we've committed up to here
+                CLIENT(12, 3, new UnitTestCommand())
+        };
+        clearLog(); // clear out the log completely - we don't even want the sentinel
+        insertIntoLog(entries);
+
+        // set the current term
+        long currentTerm = 4;
+        store.setCurrentTerm(currentTerm);
+
+        // set the committed index
+        long commitIndex = 11;
+        store.setCommitIndex(commitIndex);
+
+        // have the snapshot store return the snapshot
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
+
+        //
+        // situation is as follows:
+        //
+        //                                             +----------- COMMITTED
+        //                                             V
+        //                       ------------------------------
+        //    .... EMPTY ....   | 07 | 08 | 09 | 10 | 11 | 12 | (LOG)
+        //                      ------------------------------
+        //  ------------------------------------
+        // |         LAST APPLIED = 9          | (SNAPSHOT)
+        // ------------------------------------
+        //             ^
+        //             +----------- INDEX TO SEARCH FROM = 5
+        //
+
+        Committed committed;
+
+        // OK, now, let's start by saying that the last index we applied was 5
+        // we should get the snapshot back
+        committed = algorithm.getNextCommitted(5);
+        checkMatchingSnapshot(committed, storedSnapshot);
+
+        // when we make the second call we should ignore the
+        // overlapping log region
+        // and return the first log entry with new info
+        // i.e. the entry at index 10
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 9
+        checkMatchingCommittedLogEntry(committed, unappliedEntries[3]);
+
+        // when we make the third call we should get the last committed unapplied log entry
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 10
+        checkMatchingCommittedLogEntry(committed, unappliedEntries[4]);
+
+        // if we make a fourth call we should get nothing since there are no committed unapplied entries left
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 11
+        assertThat(committed, nullValue());
+
+        // we should not have changed the internal state at all
+        assertThatLogContains(entries);
+        assertThatTermAndCommitIndexHaveValues(currentTerm, commitIndex);
+    }
+
+    // log and snapshot
+    // we do have overlap for some entries
+    // initialIndexToSearchFrom is before the end of the snapshot and just before the beginning of the log
+    // _either_ the snapshot _or_ a log entry can be returned for the first call to getNextCommitted (it's up to us to decide which one)
+    @Test
+    public void shouldReturnLogEntryInResponseToRepeatedGetNextCommittedCallsWithNonZeroInitialIndexToSearchFromAndOverlapBetweenLogAndSnapshot() throws Exception {
+        // we have a snapshot that contains data to index 7 (inclusive)
+        SnapshotsStore.ExtendedSnapshot snapshot = new UnitTestSnapshot(7L, 2);
+
+        // the log only contains entries from index 7 (inclusive) onwards
+        LogEntry unappliedEntry0 = NOOP(7, 2);
+        final LogEntry[] entries = new LogEntry[] {
+                unappliedEntry0, // <------ we've committed up to here
+                NOOP(8, 2),
+                NOOP(9, 3),
+                CLIENT(10, 3, new UnitTestCommand()),
+                CLIENT(11, 3, new UnitTestCommand()),
+                CLIENT(12, 3, new UnitTestCommand())
+        };
+        clearLog(); // want the log to be completely clear
+        insertIntoLog(entries);
+
+        // set the current term
+        long currentTerm = 3;
+        store.setCurrentTerm(currentTerm);
+
+        // set the committed index
+        long commitIndex = 7;
+        store.setCommitIndex(commitIndex);
+
+        // return the snapshot defined above when asked for the latest
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(snapshot);
+
+        //
+        // situation is as follows:
+        //
+        //                                   +----------- COMMITTED
+        //                                   V
+        //                                 ------------------------------
+        //          .... EMPTY ....        | 07 | 08 | 09 | 10 | 11 | 12 | (LOG)
+        //                                 ------------------------------
+        //  ------------------------------------
+        // |         LAST APPLIED = 7          | (SNAPSHOT)
+        // ------------------------------------
+        //                             ^
+        //                             +----------- INDEX TO SEARCH FROM = 6
+        //
+        // so, the snapshot and the log overlap for one index: 7
+        // and we've committed up to index 7 as well
+        //
+        // if the caller says they've applied up to index 6, we have two options:
+        //   1. return a snapshot: they will flush their state and load the snapshot
+        //   2. return only log entry 7: they simply apply that entry as usual
+        //
+        // we opt for option 2
+        //
+
+        Committed committed;
+
+        // OK, now, let's start by saying that the last index we applied was '6' (kinda weird, given that we have a snapshot with last applied = 7, but, whatever)
+        committed = algorithm.getNextCommitted(6);
+
+        // check that we got the _log entry_ back
+        checkMatchingCommittedLogEntry(committed, unappliedEntry0);
+
+        // if we make a second call we should get nothing (because index 7 was the last one committed)
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 7
+        assertThat(committed, nullValue());
+
+        // we should not have changed our internal state
+        assertThatLogContains(entries);
+        assertThatTermAndCommitIndexHaveValues(currentTerm, commitIndex);
+    }
+
+    // log and snapshot
+    // we do have overlap for some entries
+    // similar to test above, but: initial indexToSearchFrom is after the end of the snapshot, and before the last committed entry in the log
+    // _only_ a log entry can be returned for the first call to getNextCommitted
+    @Test
+    public void shouldReturnLogEntriesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromNonZeroAndOverlapBetweenLogAndSnapshot() throws Exception {
+        // we have a snapshot that contains data to index 9 (inclusive)
+        long lastAppliedIndex = 9;
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(lastAppliedIndex, 2);
+
+        // we have a log that contains entries from index 7 onwards
+        LogEntry unappliedEntry0 = CLIENT(11, 3, new UnitTestCommand());
+        final LogEntry[] entries = new LogEntry[] {
+                CLIENT(7, 2, new UnitTestCommand()),
+                NOOP(8, 2),
+                NOOP(9, 3),
+                CLIENT(10, 3, new UnitTestCommand()),
+                unappliedEntry0, // <------ we've committed up to here
+                CLIENT(12, 3, new UnitTestCommand())
+        };
+        clearLog(); // clear out the log completely - we don't even want the sentinel
+        insertIntoLog(entries);
+
+        // set the current term
+        long currentTerm = 3;
+        store.setCurrentTerm(currentTerm);
+
+        // set the committed index
+        long commitIndex = 11;
+        store.setCommitIndex(commitIndex);
+
+        // have the snapshot store return the snapshot
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
+
+        //
+        // situation is as follows:
+        //
+        //                                             +----------- COMMITTED
+        //                                             V
+        //                       ------------------------------
+        //    .... EMPTY ....   | 07 | 08 | 09 | 10 | 11 | 12 | (LOG)
+        //                      ------------------------------
+        //  ------------------------------------
+        // |         LAST APPLIED = 9          | (SNAPSHOT)
+        // ------------------------------------
+        //                                      ^
+        //                                      +----------- INDEX TO SEARCH FROM = 10
+        //
+
+        Committed committed;
+
+        // OK, now, let's start by saying that the last index we applied was 10
+        // we should get the only remaining committed unapplied entry back
+        committed = algorithm.getNextCommitted(10);
+        checkMatchingCommittedLogEntry(committed, unappliedEntry0);
+
+        // if we make one more call we should get nothing
+        committed = algorithm.getNextCommitted(committed.getIndex()); // index = 11
+        assertThat(committed, nullValue());
+
+        // we haven't changed the state at all
+        assertThatLogContains(entries);
+        assertThatTermAndCommitIndexHaveValues(currentTerm, commitIndex);
+    }
+
+    private void checkCorrectSequenceOfLogEntriesReturnedForRepeatedGetNextCommittedCalls(long initialIndexToSearchFrom, LogEntry[] unappliedEntries) {
+        int unappliedEntriesCounter = 0;
+        long indexToSearchFrom = initialIndexToSearchFrom;
+        while(true) {
+            // get the next committed
+            Committed committed = algorithm.getNextCommitted(indexToSearchFrom);
+
+            // check if we can still proceed
+            if (committed == null) {
+                break;
+            }
+
+            // check the returned log entry and update the next index to search from
+            checkMatchingCommittedLogEntry(committed, unappliedEntries[unappliedEntriesCounter]);
+            indexToSearchFrom = committed.getIndex();
+
+            // move on to the next entry we're supposed to get
+            unappliedEntriesCounter++;
+        }
+
+        // there are no more unapplied entries that should have been returned to the caller
+        assertThat(unappliedEntriesCounter, equalTo(unappliedEntries.length));
+    }
+
+    private static void checkMatchingSnapshot(Committed committed, Snapshot expectedSnapshot) throws IOException {
+        checkArgument(committed instanceof Snapshot);
+
+        assertThat(committed.getType(), equalTo(Committed.Type.SNAPSHOT));
+
+        Snapshot actualSnapshot = (Snapshot) committed;
+        assertThat(actualSnapshot.getIndex(), equalTo(expectedSnapshot.getIndex()));
+        assertThat(actualSnapshot.getSnapshotInputStream(), notNullValue());
+    }
+
+    private static void checkMatchingCommittedLogEntry(Committed committed, LogEntry entry) {
+        if (entry.getType() == LogEntry.Type.CLIENT) {
+            checkArgument(committed instanceof CommittedCommand);
+            checkArgument(entry instanceof LogEntry.ClientEntry);
+
+            assertThat(committed.getType(), equalTo(Committed.Type.COMMAND));
+
+            CommittedCommand committedCommand = (CommittedCommand) committed;
+            LogEntry.ClientEntry clientEntry = (LogEntry.ClientEntry) entry;
+
+            assertThat(committedCommand.getIndex(), equalTo(clientEntry.getIndex()));
+            assertThat(committedCommand.getCommand(), sameInstance(clientEntry.getCommand()));
+        } else if (entry.getType() == LogEntry.Type.NOOP) {
+            checkArgument(entry instanceof LogEntry.NoopEntry);
+            assertThat(committed.getType(), equalTo(Committed.Type.SKIP));
+            assertThat(committed.getIndex(), equalTo(entry.getIndex()));
+        } else {
+            throw new IllegalArgumentException("unexpected entry type:" + entry.getType().name());
+        }
     }
 
     //================================================================================================================//
@@ -4472,7 +5370,7 @@ public final class RaftAlgorithmTest {
 
         IllegalStateException applyCommandException = new IllegalStateException("listener failed");
 
-        doThrow(applyCommandException).when(listener).applyCommand(anyLong(), any(Command.class));
+        doThrow(applyCommandException).when(listener).applyCommitted(any(CommittedCommand.class));
 
         // attempt to submit a command
         UnitTestCommand command0 = new UnitTestCommand();
@@ -4513,7 +5411,7 @@ public final class RaftAlgorithmTest {
         }
 
         // check that we attempted to call back the listener only once, and never again
-        verify(listener).applyCommand(2, command0);
+        verify(listener).applyCommitted(argThat(isCommittedCommandAtIndex(2, command0)));
         verifyNoMoreInteractions(listener);
 
         // check that we've updated our state before calling the listener

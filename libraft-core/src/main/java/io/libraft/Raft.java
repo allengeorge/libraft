@@ -29,6 +29,7 @@
 package io.libraft;
 
 import com.google.common.util.concurrent.ListenableFuture;
+import io.libraft.algorithm.StorageException;
 
 import javax.annotation.Nullable;
 
@@ -38,18 +39,26 @@ import javax.annotation.Nullable;
 public interface Raft {
 
     /**
-     * Get the <strong>next</strong> committed {@link Command} with a log index
+     * Indicate that a snapshot was written using a given {@code snapshotWriter}.
+     *
+     * @param snapshotWriter an instance of {@code SnapshotWriter} with which the snapshot was created
+     */
+    void snapshotWritten(SnapshotWriter snapshotWriter) throws StorageException;
+
+    /**
+     * Get the <strong>next</strong> committed object (either a
+     * {@link Snapshot} or a {@link CommittedCommand}) with a log index
      * <strong>after</strong> {@code indexToSearchFrom}.
      *
-     * @param indexToSearchFrom index >= 0 after which to search for committed {@code Command}
-     *                          instances in the <strong>local</strong> server's Raft log.
+     * @param indexToSearchFrom index >= 0 after which to search for committed objects
+     *                          in the <strong>local</strong> server's snapshot store or Raft log.
      *                          {@code indexToSearch} should meet the following criteria:
      *                          {@code 0 <= indexToSearch <= lastLogIndex}
-     * @return an instance of {@link CommittedCommand} if the <strong>local</strong> server's
-     *         Raft log contains a committed command <strong>after</strong> {@code indexToSearchFrom}.
+     * @return an instance of {@link Committed} if the <strong>local</strong> server's
+     *         state contains a committed object <strong>after</strong> {@code indexToSearchFrom}.
      *         {@code null} otherwise
      */
-     @Nullable CommittedCommand getNextCommittedCommand(long indexToSearchFrom);
+    @Nullable Committed getNextCommitted(long indexToSearchFrom) throws StorageException;
 
     /**
      * Submit an object to be replicated to the cluster.

@@ -39,8 +39,9 @@ package io.libraft.algorithm;
 @SuppressWarnings("unused")
 public final class RaftError extends Error {
 
-    private RaftError() {
-    }
+    private static final long serialVersionUID = -6985383418788511438L;
+
+    private RaftError() { }
 
     private RaftError(String message) {
         super(message);

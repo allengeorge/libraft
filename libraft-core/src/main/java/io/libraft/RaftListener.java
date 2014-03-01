@@ -36,7 +36,10 @@ import javax.annotation.Nullable;
  * <ul>
  *     <li>The leader of the Raft cluster changes
  *         (i.e. the current leader loses leadership, or a new leader is chosen).</li>
+ *     <li>The listener must serialize its local state to a snapshot.</li>
  *     <li>A command is committed to the Raft cluster.</li>
+ *     <li>The listener's local state must be flushed and replaced by
+ *         the state contained in a previously-created snapshot.</li>
  * </ul>
  */
 public interface RaftListener {
@@ -54,10 +57,28 @@ public interface RaftListener {
     void onLeadershipChange(@Nullable String leader);
 
     /**
-     * Indicates that {@code command} was committed to the Raft cluster.
+     * Indicates that the local state must be serialized to a snapshot.
+     * Once local state has been serialized, the client
+     * must use {@link Raft#snapshotWritten(SnapshotWriter)} (passing {@code snapshotWriter}
+     * as the parameter) to persist the created snapshot to durable storage.
      *
-     * @param index unique, positive log index of {@code command}
-     * @param command {@code Command} instance that was committed to the Raft cluster
+     * @param snapshotWriter instance of {@code SnapshotWriter} with which
+     *                       the local state is serialized
      */
-    void applyCommand(long index, Command command);
+    void writeSnapshot(SnapshotWriter snapshotWriter);
+
+    /**
+     * Indicates that state has been replicated to the Raft cluster.
+     * This replicated state can take one of two forms:
+     * <ul>
+     *     <li>A client-issued command.</li>
+     *     <li>A snapshot containing aggregate serialized state
+     *         with which the client should replace its local state.</li>
+     * </ul>
+     *
+     * @param committed An instance of {@link Committed}
+     *                  with type {@link Committed.Type#SKIP},
+     *                  a{@link CommittedCommand} or a {@link Snapshot}
+     */
+    void applyCommitted(Committed committed);
 }

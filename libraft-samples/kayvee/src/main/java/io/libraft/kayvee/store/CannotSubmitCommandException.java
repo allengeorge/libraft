@@ -16,10 +16,19 @@ import java.util.Set;
  */
 public final class CannotSubmitCommandException extends KayVeeException {
 
+    private static final long serialVersionUID = -1841537123003976950L;
+
     private final String self;
     private final @Nullable String leader;
     private final Set<ClusterMember> members;
 
+    /**
+     * Constructor.
+     *
+     * @param cause instance of {@code NotLeaderException} that was thrown
+     *              when a command was submitted to the Raft cluster
+     * @param members unique ids of all the servers (including the local server) that comprise the Raft cluster
+     */
     public CannotSubmitCommandException(NotLeaderException cause, Set<ClusterMember> members) {
         super(cause.getMessage());
 
@@ -28,14 +37,29 @@ public final class CannotSubmitCommandException extends KayVeeException {
         this.members = members;
     }
 
+    /**
+     * Get the unique id of the local KayVee server.
+     *
+     * @return unique id of the local KayVee server
+     */
     public String getSelf() {
         return self;
     }
 
+    /**
+     * Get the unique id of the server that is the leader of the Raft cluster.
+     *
+     * @return unique id of the server that is the leader of the Raft cluster, or null if the leader is not known
+     */
     public @Nullable String getLeader() {
         return leader;
     }
 
+    /**
+     * Get the unique ids of all the servers that comprise the Raft cluster.
+     *
+     * @return unique ids of all the servers (including the local server) that comprise the Raft cluster
+     */
     public Set<ClusterMember> getMembers() {
         return members;
     }

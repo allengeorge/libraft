@@ -33,17 +33,22 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Objects;
 import org.hibernate.validator.constraints.NotEmpty;
 
+import javax.annotation.Nullable;
 import java.util.Set;
 
 /**
  * Defines a KayVee/Raft cluster. Contains the following blocks and properties:
  * <ul>
- *     <li>self</li>
- *     <li>members</li>
+ *     <li>self (unique id of the local Raft server).</li>
+ *     <li>members (configuration block for each Raft server in the Raft cluster).
+ *         {@code members} <strong>must</strong> contain a configuration block for the local
+ *         Raft server as well.</li>
  * </ul>
- * See the KayVee README.md for more on the KayVee configuration.
  */
 public final class ClusterConfiguration {
+
+    private static final String SELF = "self";
+    private static final String MEMBERS = "members";
 
     @NotEmpty
     private final String self;
@@ -51,22 +56,41 @@ public final class ClusterConfiguration {
     @NotEmpty
     private final Set<ClusterMember> members;
 
+    /**
+     * Constructor.
+     *
+     * @param self non-null, non-empty id of the local Raft server
+     * @param members set of configuration blocks - one for each
+     *                member of the Raft cluster to which this server belongs
+     */
     @JsonCreator
-    public ClusterConfiguration(@JsonProperty("self") String self, @JsonProperty("members") Set<ClusterMember> members) {
+    public ClusterConfiguration(@JsonProperty(SELF) String self, @JsonProperty(MEMBERS) Set<ClusterMember> members) {
         this.self = self;
         this.members = members;
     }
 
+    /**
+     * Get the id of the local Raft server.
+     *
+     * @return non-null, non-empty id of the local Raft server
+     */
     public String getSelf() {
         return self;
     }
 
+    /**
+     * Get the configuration blocks for the members
+     * that belong to the Raft cluster.
+     *
+     * @return set of configuration blocks - one for
+     * each member of the Raft cluster to which this server belongs
+     */
     public Set<ClusterMember> getMembers() {
         return members;
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(@Nullable Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
 
@@ -78,5 +102,14 @@ public final class ClusterConfiguration {
     @Override
     public int hashCode() {
         return Objects.hashCode(self, members);
+    }
+
+    @Override
+    public String toString() {
+        return Objects
+                .toStringHelper(this)
+                .add(SELF, self)
+                .add(MEMBERS, members)
+                .toString();
     }
 }

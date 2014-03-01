@@ -78,6 +78,34 @@ public final class RaftConfigurationLoaderTest {
     }
 
     @Test
+    public void shouldDeserializeConfigurationWithMinimalFieldsAndSnapshotsDisabledExplicitly() throws IOException, RaftConfigurationException {
+        String configFilePath = Resources.getResource("fixtures/config.minimal_fields_snapshots_disabled_explicitly.good.json").getPath();
+        RaftConfiguration configuration = RaftConfigurationLoader.loadFromFile(configFilePath);
+        assertThat(WRITER.writeValueAsString(configuration), configuration, equalTo(RaftConfigurationFixture.RAFT_MINIMAL_FIELDS_SNAPSHOTS_DISABLED_EXPLICITLY_CONFIGURATION));
+    }
+
+    @Test
+    public void shouldDeserializeConfigurationWithMinimalFieldsAndSnapshotsDisabledExplicitlyWithAdditionalSnapshotFields() throws IOException, RaftConfigurationException {
+        String configFilePath = Resources.getResource("fixtures/config.minimal_fields_snapshots_disabled_explicitly_with_additional_snapshot_fields.good.json").getPath();
+        RaftConfiguration configuration = RaftConfigurationLoader.loadFromFile(configFilePath);
+        assertThat(WRITER.writeValueAsString(configuration), configuration, equalTo(RaftConfigurationFixture.RAFT_MINIMAL_FIELDS_SNAPSHOTS_DISABLED_EXPLICITLY_WITH_ADDITIONAL_SNAPSHOT_FIELDS_CONFIGURATION));
+    }
+
+    @Test
+    public void shouldDeserializeConfigurationWithMinimalFieldsAndSnapshotsEnabledAndSnapshotDirectoryOnly() throws IOException, RaftConfigurationException {
+        String configFilePath = Resources.getResource("fixtures/config.minimal_fields_snapshots_enabled_with_snapshot_directory_only.good.json").getPath();
+        RaftConfiguration configuration = RaftConfigurationLoader.loadFromFile(configFilePath);
+        assertThat(WRITER.writeValueAsString(configuration), configuration, equalTo(RaftConfigurationFixture.RAFT_MINIMAL_FIELDS_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_DIRECTORY_ONLY_CONFIGURATION));
+    }
+
+    @Test
+    public void shouldDeserializeConfigurationWithMinimalFieldsAndSnapshotsEnabledAndSnapshotCheckIntervalOnly() throws IOException, RaftConfigurationException {
+        String configFilePath = Resources.getResource("fixtures/config.minimal_fields_snapshots_enabled_with_snapshot_check_interval_only.good.json").getPath();
+        RaftConfiguration configuration = RaftConfigurationLoader.loadFromFile(configFilePath);
+        assertThat(WRITER.writeValueAsString(configuration), configuration, equalTo(RaftConfigurationFixture.RAFT_MINIMAL_FIELDS_SNAPSHOTS_ENABLED_WITH_SNAPSHOT_CHECK_INTERVAL_ONLY_CONFIGURATION));
+    }
+
+    @Test
     public void shouldDeserializeConfigurationWithAllOptionalFields() throws IOException, RaftConfigurationException {
         String configFilePath = Resources.getResource("fixtures/config.all_fields.good.json").getPath();
         RaftConfiguration configuration = RaftConfigurationLoader.loadFromFile(configFilePath);
@@ -109,6 +137,34 @@ public final class RaftConfigurationLoaderTest {
     public void shouldFailToLoadConfigurationThatHasInvalidMemberEndpoint() throws IOException, RaftConfigurationException {
         String configFilePath = Resources.getResource("fixtures/config.invalid_member_endpoint.bad.json").getPath();
         expectedException.expect(JsonMappingException.class);
+        RaftConfigurationLoader.loadFromFile(configFilePath);
+    }
+
+    @Test
+    public void shouldFailToLoadConfigurationThatHasInvalidMinEntriesToSnapshot() throws IOException, RaftConfigurationException {
+        String configFilePath = Resources.getResource("fixtures/config.minimal_fields_invalid_min_entries_to_snapshot.bad.json").getPath();
+        expectedException.expect(RaftConfigurationException.class);
+        RaftConfigurationLoader.loadFromFile(configFilePath);
+    }
+
+    @Test
+    public void shouldFailToLoadConfigurationThatHasZeroMinEntriesToSnapshot() throws IOException, RaftConfigurationException {
+        String configFilePath = Resources.getResource("fixtures/config.minimal_fields_zero_min_entries_to_snapshot.bad.json").getPath();
+        expectedException.expect(RaftConfigurationException.class);
+        RaftConfigurationLoader.loadFromFile(configFilePath);
+    }
+
+    @Test
+    public void shouldFailToLoadConfigurationThatHasGreaterThanIntMaxMinusOneMinEntriesToSnapshot() throws IOException, RaftConfigurationException {
+        String configFilePath = Resources.getResource("fixtures/config.minimal_fields_greater_than_int_max_minus_one_min_entries_to_snapshot.bad.json").getPath();
+        expectedException.expect(RaftConfigurationException.class);
+        RaftConfigurationLoader.loadFromFile(configFilePath);
+    }
+
+    @Test
+    public void shouldFailToLoadConfigurationThatInvalidSnapshotCheckInterval() throws IOException, RaftConfigurationException {
+        String configFilePath = Resources.getResource("fixtures/config.minimal_fields_invalid_snapshot_check_interval.bad.json").getPath();
+        expectedException.expect(RaftConfigurationException.class);
         RaftConfigurationLoader.loadFromFile(configFilePath);
     }
 }

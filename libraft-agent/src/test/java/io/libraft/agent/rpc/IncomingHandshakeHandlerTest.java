@@ -29,6 +29,7 @@
 package io.libraft.agent.rpc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.libraft.agent.TestLoggingRule;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
@@ -44,6 +45,8 @@ import org.junit.rules.ExpectedException;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -56,6 +59,8 @@ import static org.mockito.Mockito.when;
 
 public final class IncomingHandshakeHandlerTest {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(IncomingHandshakeHandlerTest.class);
+
     public static final String S_01 = "S_01";
     private final Channel channel = mock(Channel.class);
     private final ChannelPipeline pipeline = mock(ChannelPipeline.class);
@@ -65,6 +70,9 @@ public final class IncomingHandshakeHandlerTest {
 
     @Rule
     public final ExpectedException expectedException = ExpectedException.none();
+
+    @Rule
+    public final TestLoggingRule loggingRule = new TestLoggingRule(LOGGER);
 
     @Test
     public void shouldThrowExceptionIfBadHandshakeIsReceived() throws Exception {

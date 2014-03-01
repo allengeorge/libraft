@@ -107,8 +107,8 @@ subprojects {
 
     // these properties now exist, so define their values here
 
-    // Java 1.6 syntax
-    sourceCompatibility = '1.6'
+    // Java 1.7 syntax
+    sourceCompatibility = '1.7'
 
     // jacoco properties
     jacocoTestReport {
@@ -121,6 +121,19 @@ subprojects {
     // default repository
     repositories {
         mavenCentral()
+    }
+
+    // use the following dependency resolution strategy for all configurations
+    // this allows me to override and choose a specific library version when necessary
+    // see http://www.gradle.org/docs/1.10/dsl/org.gradle.api.artifacts.ResolutionStrategy.html
+    configurations.all {
+        resolutionStrategy {
+            eachDependency { DependencyResolveDetails details ->
+                if (details.requested.group == 'ch.qos.logback') {
+                    details.useVersion '1.0.13'
+                }
+            }
+        }
     }
 
     // common dependencies

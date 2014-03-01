@@ -41,6 +41,8 @@ package io.libraft;
 @SuppressWarnings("unused")
 public final class ReplicationException extends RaftException {
 
+    private static final long serialVersionUID = 2055604328517674654L;
+
     private Command command;
 
     private ReplicationException() {}

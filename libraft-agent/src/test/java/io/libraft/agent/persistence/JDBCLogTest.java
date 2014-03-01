@@ -147,6 +147,23 @@ public final class JDBCLogTest {
     }
 
     @Test
+    public void shouldReturnNullWhenGetFirstIsCalledOnEmptyTable() throws StorageException {
+        assertThat(jdbcLog.getFirst(), nullValue());
+    }
+
+    @Test
+    public void shouldReturnFirstValueWhenGetFirstIsCalled() throws StorageException {
+        LogEntry firstEntry = new LogEntry.NoopEntry(1, 3);
+
+        // notice that I've inserted the rows out of order
+        jdbcLog.put(new LogEntry.ClientEntry(3, 3, new UnitTestCommand("LAST")));
+        jdbcLog.put(firstEntry);
+        jdbcLog.put(new LogEntry.ClientEntry(2, 3, new UnitTestCommand("SECOND_LAST")));
+
+        assertThat(jdbcLog.getFirst(), equalTo(firstEntry));
+    }
+
+    @Test
     public void shouldReturnNullWhenGetLastIsCalledOnEmptyTable() throws StorageException {
         assertThat(jdbcLog.getLast(), nullValue());
     }

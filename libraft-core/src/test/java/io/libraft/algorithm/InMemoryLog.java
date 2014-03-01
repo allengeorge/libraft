@@ -29,11 +29,12 @@
 package io.libraft.algorithm;
 
 import com.google.common.base.Objects;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+
+import static com.google.common.base.Preconditions.checkArgument;
 
 /**
  * Implements the {@link Log} interface representing the Raft consensus log. This log is stored
@@ -47,13 +48,32 @@ class InMemoryLog implements Log {
 
     @Override
     public @Nullable LogEntry get(long index) throws StorageException {
-        Preconditions.checkArgument(index >= 0, index);
+        checkArgument(index >= 0, index);
 
         if (index >= entries.size()) {
             return null;
         }
 
         return entries.get((int) index);
+    }
+
+    @Override
+    public @Nullable LogEntry getFirst() throws StorageException {
+        if (entries.isEmpty()) {
+            return null;
+        }
+
+        LogEntry returned = null;
+
+        for (LogEntry entry : entries) {
+            // noinspection ConstantConditions
+            if (entry != null) { // note that entry _can_ be null; I intentionally put nulls into indexes that are 'empty'
+                returned = entry;
+                break;
+            }
+        }
+
+        return returned;
     }
 
     @Override
@@ -67,15 +87,22 @@ class InMemoryLog implements Log {
 
     @Override
     public void put(LogEntry entry) throws StorageException {
-        Preconditions.checkArgument(entry.getIndex() >= 0);
+        checkArgument(entry.getIndex() >= 0);
 
         if (entry.getIndex() == 0) {
-            Preconditions.checkArgument(entry.equals(LogEntry.SENTINEL));
+            checkArgument(entry.equals(LogEntry.SENTINEL));
+        }
+
+        if (entry.getIndex() > entries.size()) { // [sigh] manually resize the list
+            for (int i = entries.size(); i < entry.getIndex(); i++) {
+                entries.add(i, null);
+            }
         }
 
         if (entry.getIndex() < entries.size()) {
             entries.set((int) entry.getIndex(), entry);
         } else {
+            checkArgument(entry.getIndex() == entries.size(), "index:%s size:%s", entry.getIndex(), entries.size());
             entries.add((int) entry.getIndex(), entry);
         }
     }
@@ -93,7 +120,8 @@ class InMemoryLog implements Log {
 
     @Override
     public String toString() {
-        return Objects.toStringHelper(this)
+        return Objects
+                .toStringHelper(this)
                 .add("entries", entries)
                 .toString();
     }

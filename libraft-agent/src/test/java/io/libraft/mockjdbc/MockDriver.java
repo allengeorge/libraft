@@ -35,6 +35,7 @@ import java.sql.Connection;
 import java.sql.Driver;
 import java.sql.DriverPropertyInfo;
 import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
 import java.util.Properties;
 
 import static org.mockito.Mockito.mock;
@@ -65,6 +66,11 @@ public class MockDriver implements Driver {
     public MockDriver(String driverSpecificName) {
         LOGGER.trace("initialize mock driver name:{}", driverSpecificName);
         this.driverSpecificName = driverSpecificName;
+    }
+
+    @Override
+    public java.util.logging.Logger getParentLogger() throws SQLFeatureNotSupportedException {
+        throw new SQLFeatureNotSupportedException("jul unsupported");
     }
 
     @Override

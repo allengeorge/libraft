@@ -62,17 +62,43 @@ public final class KeysResource {
     private final Set<ClusterMember> members;
     private final DistributedStore distributedStore;
 
+    /**
+     * Constructor.
+     *
+     * @param members set of all the servers in the KayVee cluster
+     * @param distributedStore instance of {@code DistributedStore} with
+     *                         which to interact with the KayVee cluster
+     */
     public KeysResource(Set<ClusterMember> members, DistributedStore distributedStore) {
         this.members = members;
         this.distributedStore = distributedStore;
     }
 
+    /**
+     * Get the {@code KeyResource} that represents {@code key}.
+     * The returned resource can be used to perform operations on {@code key}
+     *
+     * @param key non-null, non-empty key for which a {@code KeyResource} should be retrieved
+     * @return a valid instance of {@code KeyResource} with
+     * which the caller can perform operations on {@code key}
+     *
+     * @see KeyResource
+     */
     @Path("/{key:" + KEY_PATTERN + "}")
     public KeyResource forKey(@PathParam("key") String key) {
         LOGGER.trace("locate sub-resource:{}", key);
         return new KeyResource(key, members, distributedStore);
     }
 
+    /**
+     * Get all the {@code key=>value} pairs in the KayVee distributed key-value store.
+     *
+     * @return a list of all {@code key=>value} pairs in the KayVee distributed key-value store
+     * @throws CannotSubmitCommandException if this server is not the
+     * leader of the Raft cluster and cannot submit commands to the cluster
+     * @throws Exception if this operation cannot be replicated to the Raft cluster. If an exception is
+     * thrown this operation is in an <strong>unknown</strong> state, and should be retried
+     */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     public Collection<KeyValue> getAll() throws Exception {

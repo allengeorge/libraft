@@ -36,11 +36,17 @@ import com.google.common.base.Objects;
 import javax.annotation.Nullable;
 
 /**
- * Defines the value for a key.
+ * Java representation of the JSON object used to set
+ * the value of a KayVee {@code key=>value} pair.
  * <p/>
- * See the KayVee README.md for more on where this object is used and its valid values.
+ * This object has two fields:
+ * <ul>
+ *     <li>{@code expectedValue}: the {@code value} the caller expects to find in a {@code key=>value} pair.</li>
+ *     <li>{@code newValue}: the value the caller wants to replace {@code value} with in a {@code key=>value} pair.</li>
+ * </ul>
+ * Either {@code expectedValue} or {@code newValue} may be null.
  */
-@JsonInclude(JsonInclude.Include.NON_DEFAULT)
+@JsonInclude(JsonInclude.Include.NON_DEFAULT) // only {de}serialize values that have been explicitly set
 public final class SetValue {
 
     // it is highly, highly unlikely that someone will create a key with this value
@@ -64,38 +70,79 @@ public final class SetValue {
     @JsonProperty(NEW_VALUE)
     private String newValue = DEFAULT_VALUE_TO_AVOID_SERIALIZATION;
 
+    /**
+     * Check whether the {@code expectedValue} field was explicitly set.
+     * <p/>
+     * This field can be set if a call to {@link SetValue#setExpectedValue(String)}
+     * is made, or the JSON representation of this object contains a {@code expectedValue} property.
+     *
+     * @return true if {@code expectedValue} was set, false otherwise
+     */
     @JsonIgnore
     public boolean hasExpectedValue() {
         return hasExpectedValue;
     }
 
+    /**
+     * Get the value the caller expects to find in a KayVee {@code key=>value} pair.
+     *
+     * @return the value the caller expects to find in a KayVee {@code key=>value} pair. May be null
+     * if the caller does not expect the {@code key=>value} pair to exist
+     */
     @JsonIgnore // have to do this, otherwise Jackson uses the value returned by this getter instead of the property (TODO (AG): Figure out why!)
     public @Nullable String getExpectedValue() {
         return hasExpectedValue ? expectedValue : null;
     }
 
+    /**
+     * Set the value the caller expects to find in a KayVee {@code key=>value} pair.
+     *
+     * @param expectedValue the value (possibly null) the caller expects to find in a KayVee {@code key=>value} pair
+     */
     public void setExpectedValue(@Nullable String expectedValue) {
         this.expectedValue = expectedValue;
         this.hasExpectedValue = true;
     }
 
+    /**
+     * Check whether the {@code newValue} field was explicitly set.
+     * <p/>
+     * This field can be set if a call to {@link SetValue#setNewValue(String)}
+     * is made, or the JSON representation of this object contains a {@code newValue} property.
+     *
+     * @return true if {@code newValue} was set, false otherwise
+     */
     @JsonIgnore
     public boolean hasNewValue() {
         return hasNewValue;
     }
 
+    /**
+     * Get the value the caller wants to replace {@code value} with in a KayVee {@code key=>value} pair.
+     *
+     * @return the value the caller wants to replace {@code value}
+     * with in a KayVee {@code key=>value} pair. May be null if the
+     * caller wants the pair to be deleted
+     */
     @JsonIgnore
     public @Nullable String getNewValue() {
         return hasNewValue ? newValue : null;
     }
 
+    /**
+     * Set the value the caller wants to replace {@code value} with in a KayVee {@code key=>value} pair.
+     *
+     * @param newValue the value the caller wants to replace
+     *                 {@code value} with in a KayVee {@code key=>value} pair. May be null
+     *                 if the caller wants the pair to be deleted
+     */
     public void setNewValue(@Nullable String newValue) {
         this.newValue = newValue;
         this.hasNewValue = true;
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(@Nullable Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
 

@@ -37,6 +37,8 @@ import javax.annotation.Nullable;
 @SuppressWarnings("unused")
 public final class NotLeaderException extends RaftException {
 
+    private static final long serialVersionUID = 6131822943716006815L;
+
     private String self;
     private @Nullable String leader;
 
