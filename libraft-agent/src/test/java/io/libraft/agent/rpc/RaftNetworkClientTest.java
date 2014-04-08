@@ -50,10 +50,8 @@ import org.jboss.netty.channel.local.DefaultLocalClientChannelFactory;
 import org.jboss.netty.channel.local.DefaultLocalServerChannelFactory;
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
-import org.mockito.Mockito;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,6 +59,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.Executors;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 public final class RaftNetworkClientTest {
 
@@ -75,10 +77,10 @@ public final class RaftNetworkClientTest {
     private final DefaultLocalClientChannelFactory clientChannelFactory = new DefaultLocalClientChannelFactory();
     private final DefaultLocalServerChannelFactory serverChannelFactory = new DefaultLocalServerChannelFactory();
 
-    private final RPCReceiver client0RPCReceiver = Mockito.mock(RPCReceiver.class);
+    private final RPCReceiver client0RPCReceiver = mock(RPCReceiver.class);
     private RaftNetworkClient client0;
 
-    private final RPCReceiver client1RPCReceiver = Mockito.mock(RPCReceiver.class);
+    private final RPCReceiver client1RPCReceiver = mock(RPCReceiver.class);
     private RaftNetworkClient client1;
 
     @Rule
@@ -149,24 +151,24 @@ public final class RaftNetworkClientTest {
     public void shouldProduceAndConsumeRequestVote() throws RPCException {
         client0.requestVote(ClusterMembersFixture.RAFT_MEMBER_1.getId(), 10, 20, 9);
 
-        Mockito.verifyNoMoreInteractions(client0RPCReceiver);
-        Mockito.verify(client1RPCReceiver).onRequestVote(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 20, 9);
+        verifyNoMoreInteractions(client0RPCReceiver);
+        verify(client1RPCReceiver).onRequestVote(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 20, 9);
     }
 
     @Test
     public void shouldProduceAndConsumeRequestVoteReply() throws RPCException {
         client0.requestVoteReply(ClusterMembersFixture.RAFT_MEMBER_1.getId(), 10, false);
 
-        Mockito.verifyNoMoreInteractions(client0RPCReceiver);
-        Mockito.verify(client1RPCReceiver).onRequestVoteReply(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, false);
+        verifyNoMoreInteractions(client0RPCReceiver);
+        verify(client1RPCReceiver).onRequestVoteReply(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, false);
     }
 
     @Test
     public void shouldProduceAndConsumeHeartbeatAppendEntries() throws RPCException {
         client0.appendEntries(ClusterMembersFixture.RAFT_MEMBER_1.getId(), 10, 299, 300, 9, null);
 
-        Mockito.verifyNoMoreInteractions(client0RPCReceiver);
-        Mockito.verify(client1RPCReceiver).onAppendEntries(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 299, 300, 9, null);
+        verifyNoMoreInteractions(client0RPCReceiver);
+        verify(client1RPCReceiver).onAppendEntries(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 299, 300, 9, null);
     }
 
     @Test
@@ -178,58 +180,15 @@ public final class RaftNetworkClientTest {
 
         client0.appendEntries(ClusterMembersFixture.RAFT_MEMBER_1.getId(), 10, 300, 301, 10, entries);
 
-        Mockito.verifyNoMoreInteractions(client0RPCReceiver);
-        Mockito.verify(client1RPCReceiver).onAppendEntries(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 300, 301, 10, entries);
+        verifyNoMoreInteractions(client0RPCReceiver);
+        verify(client1RPCReceiver).onAppendEntries(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 300, 301, 10, entries);
     }
 
     @Test
     public void shouldProduceAndConsumeAppendEntriesReply() throws RPCException {
         client0.appendEntriesReply(ClusterMembersFixture.RAFT_MEMBER_1.getId(), 10, 301, 2, true);
 
-        Mockito.verifyNoMoreInteractions(client0RPCReceiver);
-        Mockito.verify(client1RPCReceiver).onAppendEntriesReply(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 301, 2, true);
-    }
-
-    @Test
-    public void shouldReconnectAfterTimeoutIfConnectionFails() {
-        // disconnect the channel from client1's side
-        // prevent it from accepting any more connections
-        // verify client0.closeFuture triggered
-        // verify new connection to client1 created
-        // verify new connection received by client1
-        // end test
-    }
-
-    @Ignore
-    @Test
-    public void shouldTimeoutIfConnectDoesNotSucceed() {
-
-    }
-
-    @Ignore
-    @Test
-    public void shouldCloseConnectionIfWriteFails() {
-
-    }
-
-    @Ignore
-    @Test
-    public void shouldUnsetChannelReferenceWhenChannelIsClosed() {
-
-    }
-
-// TODO (AG): Additional tests
-//
-// - Reconnect if the channel breaks
-// - Notify caller in case of a write error
-// - Provide hook for caller to disconnect and reconnect a server (or have a separate heartbeat mechanism at the lower layer)
-//
-    // write failure
-    // connect failure
-
-    @Ignore
-    @Test
-    public void shouldThrowAndShutdownClientIfBindFails() {
-
+        verifyNoMoreInteractions(client0RPCReceiver);
+        verify(client1RPCReceiver).onAppendEntriesReply(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 301, 2, true);
     }
 }

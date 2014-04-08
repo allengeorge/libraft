@@ -30,65 +30,36 @@ package io.libraft.kayvee.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.io.Resources;
+import io.libraft.kayvee.TestLoggingRule;
+import org.junit.Rule;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.URISyntaxException;
-import java.util.Arrays;
-import java.util.Collection;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 
-@RunWith(Parameterized.class)
-public final class KayVeeAPIConversionTest {
+public final class KayVeeKeyValueConversionTest {
 
-    @Parameterized.Parameters
-    public static Collection<Object[]> parameters() {
-        return Arrays.asList(new Object[][] {
-                {"fixtures/set_value.empty_object.json", null, false, null, false},
-                {"fixtures/set_value.both_fields_null.json", null, true, null, true},
-                {"fixtures/set_value.non_empty_expected_value_null_new_value.json", "expected", true, null, true},
-                {"fixtures/set_value.null_expected_value_non_empty_new_value.json", null, true, "new", true},
-                {"fixtures/set_value.both_fields_non_empty.json", "expected", true, "new", true}
-        });
-    }
+    private static final Logger LOGGER = LoggerFactory.getLogger(KayVeeKeyValueConversionTest.class);
 
     private final ObjectMapper MAPPER = new ObjectMapper();
-    private final String resourceFilename;
-    private final @Nullable String expectedValue;
-    private final boolean shouldHasExpectedValueBeenSet;
-    private final @Nullable String newValue;
-    private final boolean shouldHasNewValueBeenSet;
 
-    public KayVeeAPIConversionTest(
-            String resourceFilename,
-            @Nullable String expectedValue,
-            boolean shouldHasExpectedValueBeenSet,
-            @Nullable String newValue,
-            boolean shouldHasNewValueBeenSet) {
-        this.resourceFilename = resourceFilename;
-        this.expectedValue = expectedValue;
-        this.shouldHasExpectedValueBeenSet = shouldHasExpectedValueBeenSet;
-        this.newValue = newValue;
-        this.shouldHasNewValueBeenSet = shouldHasNewValueBeenSet;
-    }
+    @Rule
+    public final TestLoggingRule loggingRule = new TestLoggingRule(LOGGER);
 
     @Test
     public void shouldDeserializeJSONObjectAndSetAppropriateParameters()
             throws URISyntaxException, IOException
     {
-        SetValue setValue = MAPPER.readValue(new FileInputStream(new File(Resources.getResource(resourceFilename).toURI())), SetValue.class);
+        KeyValue keyValue = MAPPER.readValue(new FileInputStream(new File(Resources.getResource("fixtures/key_value.both_fields_non_empty.json").toURI())), KeyValue.class);
 
-        assertThat(setValue.hasExpectedValue(), equalTo(shouldHasExpectedValueBeenSet));
-        assertThat(setValue.getExpectedValue(), equalTo(expectedValue));
-
-        assertThat(setValue.hasNewValue(), equalTo(shouldHasNewValueBeenSet));
-        assertThat(setValue.getNewValue(), equalTo(newValue));
+        assertThat(keyValue.getKey(), equalTo("akey"));
+        assertThat(keyValue.getValue(), equalTo("avalue"));
     }
 }

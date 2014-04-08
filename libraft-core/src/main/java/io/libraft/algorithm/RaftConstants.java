@@ -38,6 +38,8 @@ import java.util.concurrent.TimeUnit;
  */
 public abstract class RaftConstants {
 
+    private static final long TWELVE_HOURS = 12 * 60 * 60 * 1000;
+
     // MIN_ELECTION_TIMEOUT and ADDITIONAL_ELECTION_TIMEOUT_RANGE are chosen so that:
     // - The max election timeout (MAX_ELECTION_TIMEOUT) is 300 ms
     // - Even if the following sequence of events occur:
@@ -106,6 +108,11 @@ public abstract class RaftConstants {
     public static final int HEARTBEAT_INTERVAL = 15;
 
     /**
+     * Time interval at which to check if a snapshot should be made.
+     */
+    public static final long SNAPSHOT_CHECK_INTERVAL = TWELVE_HOURS;
+
+    /**
      * {@link java.util.concurrent.TimeUnit} in which all
      * the time constants in {@code RaftConstants} are defined.
      */
@@ -116,6 +123,18 @@ public abstract class RaftConstants {
      * {@link RaftAlgorithm} encounters an uncaught throwable.
      */
     public static final int UNCAUGHT_THROWABLE_EXIT_CODE = 129;
+
+    /**
+     * Constant that signals that {@link RaftAlgorithm} should
+     * <strong>not</strong> create snapshots and compact the Raft log.
+     */
+    public static final int SNAPSHOTS_DISABLED = -1;
+
+    /**
+     * Initial value returned by {@link io.libraft.SnapshotWriter#getIndex()}.
+     * This is an <em>invalid</em> log index.
+     */
+    public static final long INITIAL_SNAPSHOT_WRITER_LOG_INDEX = -1;
 
     // to prevent instantiation of RaftConstants
     private RaftConstants() {}

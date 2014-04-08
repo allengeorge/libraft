@@ -47,9 +47,9 @@ import java.util.concurrent.TimeoutException;
  *         between a leader failure and the local server's election timeout.</li>
  *     <li>The local server is the leader of the cluster. In this case it
  *         will only return {@code OK} if it can issue and commit a
- *         {@link io.libraft.kayvee.store.KayVeeCommand.NOPCommand}.
- *         There <strong>can</strong> be a <strong>false negative</strong> if
- *         the command cannot be committed due to a transient timeout.</li>
+ *         KayVee "NOP" command. There <strong>can</strong> be a
+ *         <strong>false negative</strong> if the command cannot be committed
+ *         due to a transient timeout.</li>
  * </ul>
  */
 public final class DistributedStoreCheck extends HealthCheck {
@@ -59,15 +59,21 @@ public final class DistributedStoreCheck extends HealthCheck {
 
     private final DistributedStore distributedStore;
 
+    /**
+     * Constructor.
+     *
+     * @param distributedStore instance of {@code DistributedStore} through
+     *                         which a "NOP" command is submitted to the Raft cluster
+     */
     public DistributedStoreCheck(DistributedStore distributedStore) {
         super("distributed-store");
         this.distributedStore = distributedStore;
     }
 
     @Override
-    protected Result check() throws Exception {
-        ListenableFuture<Void> nopFuture = distributedStore.nop();
+    protected Result check() {
         try {
+            ListenableFuture<Void> nopFuture = distributedStore.nop();
             nopFuture.get(TIMEOUT, TIMEOUT_TIME_UNIT);
             return Result.healthy("server is leader");
         } catch (TimeoutException e) {
@@ -90,7 +96,7 @@ public final class DistributedStoreCheck extends HealthCheck {
         }
     }
 
-    private Result getDefaultUnhealthyResult(Throwable t) {
-        return Result.unhealthy(String.format("failed to connect to Raft cluster with error '%s'", t.getMessage()));
+    private static Result getDefaultUnhealthyResult(Throwable t) {
+        return Result.unhealthy(t);
     }
 }

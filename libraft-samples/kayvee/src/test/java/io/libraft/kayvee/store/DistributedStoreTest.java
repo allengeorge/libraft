@@ -31,7 +31,6 @@ package io.libraft.kayvee.store;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import io.libraft.Command;
-import io.libraft.CommittedCommand;
 import io.libraft.NotLeaderException;
 import io.libraft.agent.RaftAgent;
 import io.libraft.kayvee.TestLoggingRule;
@@ -142,7 +141,7 @@ public final class DistributedStoreTest {
         verify(raftAgent).submitCommand(captor.capture());
 
         // trigger the raft callback
-        distributedStore.applyCommand(1, captor.getValue());
+        distributedStore.applyCommitted(new TestCommittedCommand(1, captor.getValue()));
 
         // check that we did everything we had to
         verify(localStore).set(1, key, value);
@@ -176,7 +175,7 @@ public final class DistributedStoreTest {
         doThrow(new KeyAlreadyExistsException(key)).when(localStore).compareAndSet(anyLong(), anyString(), anyString(), anyString());
 
         // trigger the raft callback
-        distributedStore.applyCommand(1, captor.getValue());
+        distributedStore.applyCommitted(new TestCommittedCommand(1, captor.getValue()));
 
         // verify that we get the exception
         assertThat(casFuture.isDone(), equalTo(true));
@@ -191,27 +190,32 @@ public final class DistributedStoreTest {
         KayVeeCommand.SETCommand commandAtIndex5 = new KayVeeCommand.SETCommand(5, "FIV", "FIV");
         KayVeeCommand.SETCommand commandAtIndex6 = new KayVeeCommand.SETCommand(6, "SIX", "SIX");
 
-        when(localStore.getLastAppliedCommandIndex()).thenReturn(0L);
+        when(localStore.getLastAppliedIndex())
+                .thenReturn(0L)
+                .thenReturn(1L)
+                .thenReturn(2L)
+                .thenReturn(5L)
+                .thenReturn(6L);
 
-        when(raftAgent.getNextCommittedCommand(0)).thenReturn(new CommittedCommand(1, commandAtIndex1));
-        when(raftAgent.getNextCommittedCommand(1)).thenReturn(new CommittedCommand(2, commandAtIndex2));
-        when(raftAgent.getNextCommittedCommand(2)).thenReturn(new CommittedCommand(5, commandAtIndex5));
-        when(raftAgent.getNextCommittedCommand(5)).thenReturn(new CommittedCommand(6, commandAtIndex6));
-        when(raftAgent.getNextCommittedCommand(6)).thenReturn(null);
+        when(raftAgent.getNextCommitted(0)).thenReturn(new TestCommittedCommand(1, commandAtIndex1));
+        when(raftAgent.getNextCommitted(1)).thenReturn(new TestCommittedCommand(2, commandAtIndex2));
+        when(raftAgent.getNextCommitted(2)).thenReturn(new TestCommittedCommand(5, commandAtIndex5));
+        when(raftAgent.getNextCommitted(5)).thenReturn(new TestCommittedCommand(6, commandAtIndex6));
+        when(raftAgent.getNextCommitted(6)).thenReturn(null);
 
         distributedStore.initialize();
 
         InOrder inOrder = inOrder(raftAgent, localStore);
         inOrder.verify(raftAgent).initialize();
-        inOrder.verify(raftAgent).getNextCommittedCommand(0);
+        inOrder.verify(raftAgent).getNextCommitted(0);
         inOrder.verify(localStore).set(1, "ONE", "ONE");
-        inOrder.verify(raftAgent).getNextCommittedCommand(1);
+        inOrder.verify(raftAgent).getNextCommitted(1);
         inOrder.verify(localStore).set(2, "TWO", "TWO");
-        inOrder.verify(raftAgent).getNextCommittedCommand(2);
+        inOrder.verify(raftAgent).getNextCommitted(2);
         inOrder.verify(localStore).set(5, "FIV", "FIV");
-        inOrder.verify(raftAgent).getNextCommittedCommand(5);
+        inOrder.verify(raftAgent).getNextCommitted(5);
         inOrder.verify(localStore).set(6, "SIX", "SIX");
-        inOrder.verify(raftAgent).getNextCommittedCommand(6);
+        inOrder.verify(raftAgent).getNextCommitted(6);
         inOrder.verifyNoMoreInteractions();
     }
 

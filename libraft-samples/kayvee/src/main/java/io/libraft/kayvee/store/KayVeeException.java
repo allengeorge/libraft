@@ -31,10 +31,12 @@ package io.libraft.kayvee.store;
 /**
  * Base class for all exceptions thrown when making
  * KayVee operations or applying a replicated {@link KayVeeCommand}
- * to the key-vale store.
+ * to the key-value store.
  */
 @SuppressWarnings("unused")
 public abstract class KayVeeException extends Exception {
+
+    private static final long serialVersionUID = -7870633002482535142L;
 
     private KayVeeException() {
         // noop

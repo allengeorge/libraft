@@ -33,11 +33,15 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import io.libraft.Command;
+import io.libraft.Committed;
+import io.libraft.CommittedCommand;
 import io.libraft.NotLeaderException;
 import io.libraft.RaftListener;
+import io.libraft.SnapshotWriter;
 import io.libraft.agent.configuration.RaftClusterConfiguration;
 import io.libraft.agent.configuration.RaftConfiguration;
 import io.libraft.agent.configuration.RaftDatabaseConfiguration;
+import io.libraft.agent.configuration.RaftSnapshotsConfiguration;
 import io.libraft.algorithm.StorageException;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -62,6 +66,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 
+/// FIXME (AG): simplify, and load snapshots on startup
 @RunWith(Parameterized.class)
 public final class RaftAgentTest {
 
@@ -214,6 +219,7 @@ public final class RaftAgentTest {
 
         // will be referenced from within the listener callback to access the raft agent
         final Map<String, MemberDatum> memberData = Maps.newHashMap();
+        final RaftSnapshotsConfiguration raftSnapshotsConfiguration = new RaftSnapshotsConfiguration(); // snapshots disabled
 
         // create the configuration for each raft member
         Map<String, Integer> serverToPorts = ImmutableMap.of("S0", getRandomPortNumber(), "S1", getRandomPortNumber(), "S2", getRandomPortNumber());
@@ -242,6 +248,7 @@ public final class RaftAgentTest {
             datum.configuration.setConnectTimeout(200);
             datum.configuration.setMinReconnectInterval(100);
             datum.configuration.setAdditionalReconnectIntervalRange(100);
+            datum.configuration.setRaftSnapshotsConfiguration(raftSnapshotsConfiguration);
 
             memberData.put(serverId, datum);
         }
@@ -254,6 +261,11 @@ public final class RaftAgentTest {
             datum.agent = RaftAgent.fromConfigurationObject(datum.configuration, new RaftListener() {
 
                 final AtomicReference<String> leader = new AtomicReference<String>(null);
+
+                @Override
+                public void writeSnapshot(SnapshotWriter snapshotWriter) {
+                    // noop
+                }
 
                 @Override
                 public void onLeadershipChange(@Nullable String leader) {
@@ -283,7 +295,15 @@ public final class RaftAgentTest {
                 }
 
                 @Override
-                public void applyCommand(long index, Command command) {
+                public void applyCommitted(Committed committed) {
+                    if (committed.getType() == Committed.Type.SKIP) {
+                        return;
+                    }
+
+                    CommittedCommand committedCommand = (CommittedCommand) committed;
+                    long index = committedCommand.getIndex();
+                    Command command = committedCommand.getCommand();
+
                     LOGGER.info("{}: apply command {} at index {}", id, command, index);
 
                     MemberDatum memberDatum = memberData.get(id);

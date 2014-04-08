@@ -14,6 +14,12 @@
         "password": "test"
     },
 
+    "snapshots" : {
+        "minEntriesToSnapshot": 100,
+        "snapshotsDirectory": "snapshots",
+        "snapshotCheckInterval": 10000
+    },
+
     "cluster": {
         "self": "S_00",
         "members": [

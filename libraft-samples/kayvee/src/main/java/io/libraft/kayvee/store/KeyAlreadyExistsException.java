@@ -28,6 +28,8 @@
 
 package io.libraft.kayvee.store;
 
+import static com.google.common.base.Preconditions.checkArgument;
+
 /**
  * Thrown when a key specified in an operation
  * cannot be created because it already exists in
@@ -35,13 +37,31 @@ package io.libraft.kayvee.store;
  */
 public final class KeyAlreadyExistsException extends KayVeeException {
 
+    private static final long serialVersionUID = 3068460555533291484L;
+
     private final String key;
 
+    /**
+     * Constructor.
+     *
+     * @param key non-null, non-empty key in a {@code key=>value} pair
+     *            that already exists in the key-value store
+     * @throws IllegalArgumentException if {@code key} is empty
+     */
     public KeyAlreadyExistsException(String key) {
         super(String.format("key:%s - already exists", key));
+
+        checkArgument(!key.isEmpty());
+
         this.key = key;
     }
 
+    /**
+     * Get the key in a {@code key=>value} pair
+     * that caused this exception to be raised.
+     *
+     * @return non-null, non-empty key
+     */
     public String getKey() {
         return key;
     }

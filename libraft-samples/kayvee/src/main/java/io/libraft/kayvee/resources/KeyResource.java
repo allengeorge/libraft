@@ -70,6 +70,17 @@ public final class KeyResource {
     private final Set<ClusterMember> members;
     private final DistributedStore distributedStore;
 
+    /**
+     * Constructor.
+     *
+     * @param key non-null, non-empty key in a {@code key=>value} pair
+     *            represented by this resource. All operations on replicated
+     *            storage will be performed on behalf of this key
+     * @param members set of servers that belong to the KayVee cluster
+     * @param distributedStore instance of {@code DistributedStore} used to perform
+     *                         operations on the Raft cluster and replicate changes
+     *                         to the distributed storage
+     */
     public KeyResource(String key, Set<ClusterMember> members, DistributedStore distributedStore) {
         this.key = key;
         this.members = members;
@@ -77,7 +88,7 @@ public final class KeyResource {
     }
 
     /**
-     * Get the {@code key} represented by this resource.
+     * Get the {@link KeyResource#key} represented by this resource.
      * <p/>
      * To be used <strong>for testing only!</strong>
      */
@@ -85,6 +96,16 @@ public final class KeyResource {
         return key;
     }
 
+    /**
+     * Get the current value associated with the {@link KeyResource#key} represented by this resource.
+     *
+     * @return current value associated with the {@link KeyResource#key} represented by this resource
+     * @throws CannotSubmitCommandException if this server is not the
+     * leader of the Raft cluster and cannot submit commands to the cluster
+     * @throws KeyNotFoundException if {@link KeyResource#key} does not exist in replicated storage
+     * @throws Exception if this operation cannot be replicated to the Raft cluster. If an exception is
+     * thrown this operation is in an <strong>unknown</strong> state, and should be retried
+     */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     public KeyValue get() throws Exception {
@@ -106,6 +127,25 @@ public final class KeyResource {
         }
     }
 
+    /**
+     * Perform a {@code SET} or {@code CAS} on the {@link KeyResource#key} represented by this resource.
+     * <p/>
+     * The rules for {@code SET} and {@code CAS} are
+     * described in the KayVee README.md. Additional validation of
+     * {@code setValue} is performed to ensure that its
+     * fields meet the preconditions for these operations.
+     *
+     * @param setValue valid instance of {@code SetValue} with fields set
+     *                 appropriately for the invoked operation
+     * @return new value associated with the {@link KeyResource#key} represented by this resource.
+     * May be null if this key was deleted from replicated storage
+     * @throws CannotSubmitCommandException if this server is not the
+     * leader of the Raft cluster and cannot submit commands to the cluster
+     * @throws Exception if this operation cannot be replicated to the Raft cluster. If an exception is
+     * thrown this operation is in an <strong>unknown</strong> state, and should be retried
+     *
+     * @see KayVeeCommand
+     */
     @PUT
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
@@ -159,6 +199,14 @@ public final class KeyResource {
         }
     }
 
+    /**
+     * Delete the {@link KeyResource#key} represented by this resource.
+     *
+     * @throws CannotSubmitCommandException if this server is not the
+     * leader of the Raft cluster and cannot submit commands to the cluster
+     * @throws Exception if this operation cannot be replicated to the Raft cluster. If an exception is
+     * thrown this operation is in an <strong>unknown</strong> state, and should be retried
+     */
     @DELETE
     public void delete() throws Exception {
         LOGGER.info("delete: {}", key);

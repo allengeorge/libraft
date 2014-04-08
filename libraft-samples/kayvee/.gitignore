@@ -1,2 +1,3 @@
 testenv/**/*.db
+testenv/**/*.snap
 testenv/**/*.log*

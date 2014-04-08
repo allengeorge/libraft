@@ -35,6 +35,7 @@ import com.google.common.base.Objects;
 import io.libraft.agent.RaftAgentConstants;
 import io.libraft.algorithm.RaftConstants;
 
+import javax.annotation.Nullable;
 import javax.validation.Valid;
 import javax.validation.constraints.Max;
 import javax.validation.constraints.Min;
@@ -52,6 +53,7 @@ import java.util.concurrent.TimeUnit;
  *     <li>minReconnectInterval</li>
  *     <li>additionalReconnectIntervalRange</li>
  *     <li>database</li>
+ *     <li>snapshots</li>
  *     <li>cluster</li>
  * </ul>
  * All timeouts and intervals are specified in <strong>milliseconds</strong>.
@@ -59,9 +61,6 @@ import java.util.concurrent.TimeUnit;
  * See the project README.md for more on the configuration.
  */
 public final class RaftConfiguration {
-
-    private static final TimeUnit DEFAULT_TIME_UNIT = TimeUnit.MILLISECONDS;
-    private static final int SIXTY_SECONDS = 60000;
 
     private static final String TIME_UNIT = "timeUnit";
     private static final String RPC_TIMEOUT = "rpcTimeout";
@@ -71,56 +70,69 @@ public final class RaftConfiguration {
     private static final String CONNECT_TIMEOUT = "connectTimeout";
     private static final String MIN_RECONNECT_INTERVAL = "minReconnectInterval";
     private static final String ADDITIONAL_RECONNECT_INTERVAL_RANGE = "additionalReconnectIntervalRange";
+    private static final String SNAPSHOTS = "snapshots";
     private static final String DATABASE = "database";
     private static final String CLUSTER = "cluster";
 
     @Min(1)
-    @Max(SIXTY_SECONDS)
+    @Max(RaftConfigurationConstants.SIXTY_SECONDS)
     @NotNull
     @JsonProperty(RPC_TIMEOUT)
     private int rpcTimeout = RaftConstants.RPC_TIMEOUT;
 
     @Min(1)
-    @Max(SIXTY_SECONDS)
+    @Max(RaftConfigurationConstants.SIXTY_SECONDS)
     @NotNull
     @JsonProperty(MIN_ELECTION_TIMEOUT)
     private int minElectionTimeout = RaftConstants.MIN_ELECTION_TIMEOUT;
 
     @Min(0)
-    @Max(SIXTY_SECONDS)
+    @Max(RaftConfigurationConstants.SIXTY_SECONDS)
     @NotNull
     @JsonProperty(ADDITIONAL_ELECTION_TIMEOUT_RANGE)
     private int additionalElectionTimeoutRange = RaftConstants.ADDITIONAL_ELECTION_TIMEOUT_RANGE;
 
     @Min(1)
-    @Max(SIXTY_SECONDS)
+    @Max(RaftConfigurationConstants.SIXTY_SECONDS)
     @NotNull
     @JsonProperty(HEARTBEAT_INTERVAL)
     private int heartbeatInterval = RaftConstants.HEARTBEAT_INTERVAL;
 
     @Min(0)
-    @Max(SIXTY_SECONDS)
+    @Max(RaftConfigurationConstants.SIXTY_SECONDS)
     @NotNull
     @JsonProperty(CONNECT_TIMEOUT)
     private int connectTimeout = RaftAgentConstants.CONNECT_TIMEOUT;
 
     @Min(1)
-    @Max(SIXTY_SECONDS)
+    @Max(RaftConfigurationConstants.SIXTY_SECONDS)
     @NotNull
     @JsonProperty(MIN_RECONNECT_INTERVAL)
     private int minReconnectInterval = RaftAgentConstants.MIN_RECONNECT_INTERVAL;
 
     @Min(0)
-    @Max(SIXTY_SECONDS)
+    @Max(RaftConfigurationConstants.SIXTY_SECONDS)
     @NotNull
     @JsonProperty(ADDITIONAL_RECONNECT_INTERVAL_RANGE)
     private int additionalReconnectIntervalRange = RaftAgentConstants.ADDITIONAL_RECONNECT_INTERVAL_RANGE;
 
     @JsonIgnore
-    private final TimeUnit timeUnit = DEFAULT_TIME_UNIT;
+    private final TimeUnit timeUnit = RaftConfigurationConstants.DEFAULT_TIME_UNIT;
+
+    //
+    // these configuration blocks have defaults
+    //
 
     @Valid
-    @JsonProperty(DATABASE) // used while pretty-printing, etc.
+    @JsonProperty(SNAPSHOTS)
+    private RaftSnapshotsConfiguration raftSnapshotsConfiguration = new RaftSnapshotsConfiguration(); // snapshots are disabled by default
+
+    //
+    // these configuration blocks have no defaults
+    //
+
+    @Valid
+    @JsonProperty(DATABASE)
     private final RaftDatabaseConfiguration raftDatabaseConfiguration;
 
     @Valid
@@ -134,9 +146,7 @@ public final class RaftConfiguration {
      * @param raftClusterConfiguration instance of {@code RaftClusterConfiguration}. This instance will be validated
      */
     @JsonCreator
-    public RaftConfiguration(
-            @JsonProperty(DATABASE) RaftDatabaseConfiguration raftDatabaseConfiguration,
-            @JsonProperty(CLUSTER) RaftClusterConfiguration raftClusterConfiguration) {
+    public RaftConfiguration(@JsonProperty(DATABASE) RaftDatabaseConfiguration raftDatabaseConfiguration, @JsonProperty(CLUSTER) RaftClusterConfiguration raftClusterConfiguration) {
         this.raftDatabaseConfiguration = raftDatabaseConfiguration;
         this.raftClusterConfiguration = raftClusterConfiguration;
     }
@@ -338,11 +348,36 @@ public final class RaftConfiguration {
      * Get the Raft database configuration.
      *
      * @return an instance of {@code RaftDatabaseConfiguration} that
-     *         describes the configuration parameters for the {@link io.libraft.algorithm.Log}
-     *         and {@link io.libraft.algorithm.Store} database backend
+     *         describes the configuration parameters for the {@link io.libraft.algorithm.Log},
+     *         {@link io.libraft.algorithm.Store} and {@link io.libraft.algorithm.SnapshotsStore}
+     *         database backend
      */
     public RaftDatabaseConfiguration getRaftDatabaseConfiguration() {
         return raftDatabaseConfiguration;
+    }
+
+    /**
+     * Get the Raft snapshots configuration.
+     *
+     * @return an instance of {@code RaftSnapshotsConfiguration} that
+     *         describes the configuration parameters associated with
+     *         creating and storing snapshots using an
+     *         {@link io.libraft.agent.snapshots.OnDiskSnapshotsStore}
+     */
+    public RaftSnapshotsConfiguration getRaftSnapshotsConfiguration() {
+        return raftSnapshotsConfiguration;
+    }
+
+    /**
+     * Set the Raft snapshots configuration.
+     *
+     * @param raftSnapshotsConfiguration instance of {@code RaftSnapshotsConfiguration} that
+     *                                   describes the configuration parameters associated with
+     *                                   creating and storing snapshots using an
+     *                                   {@link io.libraft.agent.snapshots.OnDiskSnapshotsStore}
+     */
+    public void setRaftSnapshotsConfiguration(RaftSnapshotsConfiguration raftSnapshotsConfiguration) {
+        this.raftSnapshotsConfiguration = raftSnapshotsConfiguration;
     }
 
     /**
@@ -356,7 +391,7 @@ public final class RaftConfiguration {
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(@Nullable Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
 
@@ -370,6 +405,7 @@ public final class RaftConfiguration {
                 && minReconnectInterval == other.minReconnectInterval
                 && additionalReconnectIntervalRange == other.additionalReconnectIntervalRange
                 && raftDatabaseConfiguration.equals(other.raftDatabaseConfiguration)
+                && raftSnapshotsConfiguration.equals(other.raftSnapshotsConfiguration)
                 && raftClusterConfiguration.equals(other.raftClusterConfiguration);
     }
 
@@ -385,6 +421,7 @@ public final class RaftConfiguration {
                 minReconnectInterval,
                 additionalReconnectIntervalRange,
                 raftDatabaseConfiguration,
+                raftSnapshotsConfiguration,
                 raftClusterConfiguration
         );
     }
@@ -402,6 +439,7 @@ public final class RaftConfiguration {
                 .add(MIN_RECONNECT_INTERVAL, minReconnectInterval)
                 .add(ADDITIONAL_RECONNECT_INTERVAL_RANGE, additionalReconnectIntervalRange)
                 .add(DATABASE, raftDatabaseConfiguration)
+                .add(SNAPSHOTS, raftSnapshotsConfiguration)
                 .add(CLUSTER, raftClusterConfiguration)
                 .toString();
     }

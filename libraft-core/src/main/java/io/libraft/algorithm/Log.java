@@ -36,7 +36,7 @@ import javax.annotation.Nullable;
  * Stores a sequence of {@code LogEntry} instances
  * indexed by a {@code long >= 0} referred to as a "log index".
  * Any two consecutive {@code LogEntry} instances satisfy
- * the log property LP1: {@code logIndex(LogEntry0) + 1 = logIndex(LogEntry1)}.
+ * the log property LP: {@code logIndex(LogEntry0) + 1 = logIndex(LogEntry1)}.
  * Implementations need only guarantee that each
  * <strong>individual</strong> operation is atomic.
  * They <strong>must</strong> wrap all
@@ -54,6 +54,13 @@ public interface Log {
     @Nullable LogEntry get(long index) throws StorageException;
 
     /**
+     * Get the first {@code LogEntry} in the log.
+     *
+     * @return first {@code LogEntry} in the log if the log contains <strong>any</strong> entries or {@code null} otherwise
+     */
+    @Nullable LogEntry getFirst() throws StorageException;
+
+    /**
      * Get the last {@code LogEntry} in the log.
      *
      * @return last {@code LogEntry} in the log if the log contains <strong>any</strong> entries or {@code null} otherwise
@@ -65,7 +72,7 @@ public interface Log {
      * <p/>
      * {@code logEntry} may overwrite another instance
      * previously at that index. The implementation does <strong>not</strong> have to prevent this.
-     * It also does <strong>not</strong> have to verify that LP1 is maintained.
+     * It also does <strong>not</strong> have to verify that LP is maintained.
      *
      * @param logEntry instance of {@code LogEntry} to insert at {@link LogEntry#getIndex()}
      */
@@ -80,4 +87,5 @@ public interface Log {
      * @param index index >=0 from which to remove {@code LogEntry} instances
      */
     void truncate(long index) throws StorageException;
+
 }

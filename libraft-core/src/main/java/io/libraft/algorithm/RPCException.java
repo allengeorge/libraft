@@ -38,6 +38,8 @@ package io.libraft.algorithm;
 @SuppressWarnings("unused")
 public final class RPCException extends Exception {
 
+    private static final long serialVersionUID = 2001018791991058963L;
+
     private RPCException() {}
 
     public RPCException(String message) {

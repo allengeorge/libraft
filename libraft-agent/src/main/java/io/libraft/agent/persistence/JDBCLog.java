@@ -167,6 +167,33 @@ public final class JDBCLog extends JDBCBase implements Log {
     }
 
     @Override
+    public synchronized @Nullable LogEntry getFirst() throws StorageException {
+        try {
+            return executeQuery("SELECT * FROM entries WHERE log_index=(SELECT MIN(log_index) FROM ENTRIES)", new StatementWithReturnBlock<LogEntry>() {
+                @Override
+                public @Nullable LogEntry use(PreparedStatement statement) throws Exception {
+                    return withResultSet(statement, new ResultSetBlock<LogEntry>() {
+                        @Override
+                        public LogEntry use(ResultSet resultSet) throws Exception {
+                            if (!resultSet.next()) {
+                                return null;
+                            }
+
+                            return newLogEntryFromDatabaseRow(
+                                    mapDatabaseTypeToLogEntryType(resultSet.getInt("type")),
+                                    resultSet.getLong("log_index"),
+                                    resultSet.getLong("term"),
+                                    resultSet.getBytes("data"));
+                        }
+                    });
+                }
+            });
+        } catch (Exception e) {
+            throw new StorageException("fail get last log entry", e);
+        }
+    }
+
+    @Override
     public synchronized @Nullable LogEntry getLast() throws StorageException {
         try {
             return executeQuery("SELECT * FROM entries WHERE log_index=(SELECT MAX(log_index) FROM ENTRIES)", new StatementWithReturnBlock<LogEntry>() {

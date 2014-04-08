@@ -39,6 +39,8 @@ import java.util.Set;
  */
 public final class RaftConfigurationException extends ValidationException {
 
+    private static final long serialVersionUID = -3130330576743147448L;
+
     private final Set<ConstraintViolation<RaftConfiguration>> violations;
 
     /**

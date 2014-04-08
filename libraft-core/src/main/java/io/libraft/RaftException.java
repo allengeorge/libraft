@@ -34,6 +34,8 @@ package io.libraft;
  */
 public abstract class RaftException extends Exception {
 
+    private static final long serialVersionUID = -5645492747495702034L;
+
     RaftException() {}
 
     RaftException(String message) {

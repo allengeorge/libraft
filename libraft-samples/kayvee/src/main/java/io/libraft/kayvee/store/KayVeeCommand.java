@@ -120,7 +120,7 @@ public abstract class KayVeeCommand implements Command { // public so that we ca
         }
 
         @Override
-        public boolean equals(Object o) {
+        public boolean equals(@Nullable Object o) {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
 
@@ -165,7 +165,7 @@ public abstract class KayVeeCommand implements Command { // public so that we ca
         }
 
         @Override
-        public boolean equals(Object o) {
+        public boolean equals(@Nullable Object o) {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
 
@@ -201,7 +201,7 @@ public abstract class KayVeeCommand implements Command { // public so that we ca
         }
 
         @Override
-        public boolean equals(Object o) {
+        public boolean equals(@Nullable Object o) {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
 
@@ -255,7 +255,7 @@ public abstract class KayVeeCommand implements Command { // public so that we ca
         }
 
         @Override
-        public boolean equals(Object o) {
+        public boolean equals(@Nullable Object o) {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
 
@@ -326,7 +326,7 @@ public abstract class KayVeeCommand implements Command { // public so that we ca
         }
 
         @Override
-        public boolean equals(Object o) {
+        public boolean equals(@Nullable Object o) {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
 
@@ -377,7 +377,7 @@ public abstract class KayVeeCommand implements Command { // public so that we ca
         }
 
         @Override
-        public boolean equals(Object o) {
+        public boolean equals(@Nullable Object o) {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
 

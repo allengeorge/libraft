@@ -30,7 +30,9 @@ package io.libraft.algorithm;
 
 import com.google.common.base.Objects;
 import io.libraft.Command;
+import io.libraft.Committed;
 
+import javax.annotation.Nullable;
 import java.util.Set;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -167,7 +169,7 @@ public abstract class LogEntry {
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(@Nullable Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
 
@@ -184,7 +186,7 @@ public abstract class LogEntry {
      * {@code LogEntry} that contains a client {@link Command}.
      * <p/>
      * Once this entry is committed
-     * the client is notified via {@link io.libraft.RaftListener#applyCommand(long, Command)}
+     * the client is notified via {@link io.libraft.RaftListener#applyCommitted(Committed)}
      * that this {@code Command} can be applied locally.
      */
     public static final class ClientEntry extends LogEntry {
@@ -213,7 +215,7 @@ public abstract class LogEntry {
         }
 
         @Override
-        public boolean equals(Object o) {
+        public boolean equals(@Nullable Object o) {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
             if (!super.equals(o)) return false;
@@ -222,7 +224,7 @@ public abstract class LogEntry {
             return getType() == other.getType()
                     && getIndex() == other.getIndex()
                     && getTerm() == other.getTerm()
-                    && (command != null && command.equals(other.command));
+                    && command.equals(other.command);
         }
 
         @Override
@@ -273,7 +275,7 @@ public abstract class LogEntry {
         }
 
         @Override
-        public boolean equals(Object o) {
+        public boolean equals(@Nullable Object o) {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
             if (!super.equals(o)) return false;

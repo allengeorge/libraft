@@ -33,10 +33,10 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Objects;
 import org.hibernate.validator.constraints.NotEmpty;
 
+import javax.annotation.Nullable;
+
 /**
- * Defines a {@code key=>value} pair.
- * <p/>
- * See the KayVee README.md for more on where this object is used and its valid values.
+ * Java representation of a JSON {@code key=>value} pair defined in the KayVee REST API.
  */
 public final class KeyValue {
 
@@ -51,22 +51,38 @@ public final class KeyValue {
     @JsonProperty(VALUE)
     private final String value;
 
+    /**
+     * Constructor.
+     *
+     * @param key non-null, non-empty key
+     * @param value non-null, non-empty value associated with this key
+     */
     @JsonCreator
     public KeyValue(@JsonProperty(KEY) String key, @JsonProperty(VALUE) String value) {
         this.key = key;
         this.value = value;
     }
 
+    /**
+     * Get the key for this {@code key=>value} pair.
+     *
+     * @return non-null, non-empty key
+     */
     public String getKey() {
         return key;
     }
 
+    /**
+     * Get the value for this {@code key=>value} pair.
+     *
+     * @return non-null, non-empty value
+     */
     public String getValue() {
         return value;
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(@Nullable Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
 

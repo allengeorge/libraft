@@ -36,18 +36,20 @@ import com.google.common.util.concurrent.SettableFuture;
 import com.yammer.dropwizard.lifecycle.Managed;
 import com.yammer.metrics.Metrics;
 import com.yammer.metrics.core.Histogram;
-import io.libraft.Command;
+import io.libraft.Committed;
 import io.libraft.CommittedCommand;
 import io.libraft.NotLeaderException;
 import io.libraft.RaftListener;
+import io.libraft.Snapshot;
+import io.libraft.SnapshotWriter;
 import io.libraft.agent.RaftAgent;
-import io.libraft.algorithm.StorageException;
 import io.libraft.kayvee.api.KeyValue;
 import io.libraft.kayvee.api.SetValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+import java.io.IOException;
 import java.util.Collection;
 import java.util.Random;
 import java.util.concurrent.ConcurrentMap;
@@ -101,40 +103,77 @@ public class DistributedStore implements Managed, RaftListener {
     private RaftAgent raftAgent;
     private boolean initialized;
 
+    /**
+     * Constructor.
+     *
+     * @param localStore backing store to which {@link KayVeeCommand} operations are applied
+     */
     public DistributedStore(LocalStore localStore) {
         this.localStore = localStore;
     }
 
+    /**
+     * Set the {@code RaftAgent} that functions as the local server's
+     * interface to the Raft cluster.
+     *
+     * @param raftAgent instance of {@code RaftAgent} used to interact with the Raft cluster
+     * @throws IllegalStateException if this method is called twice
+     */
     public void setRaftAgent(RaftAgent raftAgent) {
         checkState(this.raftAgent == null);
         this.raftAgent = raftAgent;
     }
 
-    public synchronized void initialize() throws StorageException {
+    /**
+     * Initialize this component. This method:
+     * <ul>
+     *     <li>Initializes the underlying {@code RaftAgent} instance.</li>
+     *     <li>Bootstraps the local server's key-value state by applying all committed {@link KayVeeCommand} operations.</li>
+     * </ul>
+     * Prior to calling this method, the underlying {@link RaftAgent}
+     * <strong>must</strong> be set using {@link DistributedStore#setRaftAgent(RaftAgent)}.
+     * Following a successful call to {@code initialize()} subsequent calls will result
+     * in an {@link IllegalStateException}.
+     *
+     * @throws Exception if the {@code RaftAgent} cannot be initialized or the
+     * local server's key-value state cannot be updated
+     * @throws IllegalStateException if {@link DistributedStore#setRaftAgent(RaftAgent)} has not been
+     * called, or this method is called multiple times
+     */
+    public synchronized void initialize() throws Exception {
         checkState(raftAgent != null);
         checkState(!initialized);
 
         raftAgent.initialize();
-        locallyApplyUnappliedCommittedCommands();
+        locallyApplyUnappliedCommittedState();
 
         initialized = true;
     }
 
-    private void locallyApplyUnappliedCommittedCommands() {
-        long lastAppliedCommandIndex = localStore.getLastAppliedCommandIndex();
-
+    private void locallyApplyUnappliedCommittedState() throws IOException {
         while(true) {
-            CommittedCommand committedCommand = raftAgent.getNextCommittedCommand(lastAppliedCommandIndex);
+            Committed committed = raftAgent.getNextCommitted(localStore.getLastAppliedIndex());
 
-            if (committedCommand == null) {
+            if (committed == null) {
                 break;
             }
 
-            applyCommandInternal(committedCommand.getIndex(), (KayVeeCommand) committedCommand.getCommand());
-            lastAppliedCommandIndex = committedCommand.getIndex();
+            applyCommittedInternal(committed);
         }
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * Prior to calling this method, the underlying {@link RaftAgent}
+     * <strong>must</strong> be set using {@link DistributedStore#setRaftAgent(RaftAgent)},
+     * and this component <strong>must</strong> be initialized using {@link DistributedStore#initialize()}.
+     * Following a successful call to {@code start()} subsequent calls are noops.
+     *
+     * @throws IllegalStateException if either
+     * {@link DistributedStore#setRaftAgent(RaftAgent)} or
+     * {@link DistributedStore#initialize()} have not been called
+     */
     @Override
     public synchronized void start() {
         if (running) {
@@ -149,8 +188,16 @@ public class DistributedStore implements Managed, RaftListener {
         running = true;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * Shuts down the underlying {@link RaftAgent}. Following a successful call to
+     * {@code stop()} subsequent calls are noops.
+     * Once this method is called further operations on {@code DistributedStore}
+     * <strong>will</strong> result in a {@link IllegalStateException}.
+     */
     @Override
-    public synchronized void stop() throws Exception {
+    public synchronized void stop() {
         if (!running) {
             return;
         }
@@ -161,23 +208,59 @@ public class DistributedStore implements Managed, RaftListener {
     }
 
     // IMPORTANT: DO NOT HOLD A LOCK WHEN CALLING issueCommandToCluster OR IN THE onLeadershipChange CALLBACK
+
     @Override
     public void onLeadershipChange(@Nullable String leader) {
         // noop - I don't care
     }
 
-    //----------------------------------------------------------------------------------------------------------------//
-
-    // cluster-committed
+    @Override
+    public void writeSnapshot(SnapshotWriter snapshotWriter) {
+        try {
+            long lastAppliedIndex = localStore.dumpState(snapshotWriter.getSnapshotOutputStream());
+            snapshotWriter.setIndex(lastAppliedIndex);
+            raftAgent.snapshotWritten(snapshotWriter);
+        } catch (IOException e) {
+            LOGGER.warn("fail create snapshot:{}", snapshotWriter);
+            throw new IllegalStateException("failed to create a snapshot", e);
+        }
+    }
 
     @Override
-    public void applyCommand(long index, Command command) {
+    public void applyCommitted(Committed committed) {
         if (!running) {
-            LOGGER.warn("store no longer active - not applying {} at index {}", command, index);
+            LOGGER.warn("store no longer active - not applying {}", committed);
             return;
         }
 
-        applyCommandInternal(index, (KayVeeCommand) command);
+        applyCommittedInternal(committed);
+    }
+
+    private void applyCommittedInternal(Committed committed) {
+        if (committed.getType() == Committed.Type.SKIP) {
+            applySkipInternal(committed);
+        } else if (committed.getType() == Committed.Type.SNAPSHOT) {
+            Snapshot snapshot = (Snapshot) committed;
+            applySnapshotInternal(snapshot);
+        } else if (committed.getType() == Committed.Type.COMMAND) {
+            CommittedCommand committedCommand = (CommittedCommand) committed;
+            applyCommandInternal(committedCommand.getIndex(), (KayVeeCommand) committedCommand.getCommand());
+        } else {
+            throw new IllegalArgumentException("unsupported type:" + committed.getType().name());
+        }
+    }
+
+    private void applySkipInternal(Committed committed) {
+        localStore.skip(committed.getIndex());
+    }
+
+    private void applySnapshotInternal(Snapshot snapshot) {
+        try {
+            localStore.loadState(snapshot.getIndex(), snapshot.getSnapshotInputStream());
+        } catch (IOException e) {
+            LOGGER.error("fail apply snapshot {}", snapshot);
+            throw new IllegalStateException("failed to apply a snapshot", e);
+        }
     }
 
     private void applyCommandInternal(long index, KayVeeCommand kayVeeCommand) {
@@ -236,38 +319,38 @@ public class DistributedStore implements Managed, RaftListener {
         }
     }
 
-    private void applyNOPCommand(long commandIndex, SettableFuture<?> removed) {
-        localStore.nop(commandIndex);
+    private void applyNOPCommand(long index, SettableFuture<?> removed) {
+        localStore.nop(index);
         setRemoved(removed, null);
     }
 
-    private void applyGETCommand(long commandIndex, KayVeeCommand.GETCommand getCommand, SettableFuture<?> removed) throws KayVeeException {
-        KeyValue keyValue = localStore.get(commandIndex, getCommand.getKey());
+    private void applyGETCommand(long index, KayVeeCommand.GETCommand getCommand, SettableFuture<?> removed) throws KayVeeException {
+        KeyValue keyValue = localStore.get(index, getCommand.getKey());
         setRemoved(removed, keyValue);
     }
 
-    private void applyALLCommand(long commandIndex, SettableFuture<?> removed) {
-        Collection<KeyValue> keyValues = localStore.getAll(commandIndex);
+    private void applyALLCommand(long index, SettableFuture<?> removed) {
+        Collection<KeyValue> keyValues = localStore.getAll(index);
         setRemoved(removed, keyValues);
     }
 
-    private void applySETCommand(long commandIndex, KayVeeCommand.SETCommand setCommand, SettableFuture<?> removed) throws KayVeeException {
-        KeyValue keyValue = localStore.set(commandIndex, setCommand.getKey(), setCommand.getNewValue());
+    private void applySETCommand(long index, KayVeeCommand.SETCommand setCommand, SettableFuture<?> removed) throws KayVeeException {
+        KeyValue keyValue = localStore.set(index, setCommand.getKey(), setCommand.getNewValue());
         setRemoved(removed, keyValue);
     }
 
-    private void applyCASCommand(long commandIndex, KayVeeCommand.CASCommand casCommand, SettableFuture<?> removed) throws KayVeeException {
-        KeyValue keyValue = localStore.compareAndSet(commandIndex, casCommand.getKey(), casCommand.getExpectedValue(), casCommand.getNewValue());
+    private void applyCASCommand(long index, KayVeeCommand.CASCommand casCommand, SettableFuture<?> removed) throws KayVeeException {
+        KeyValue keyValue = localStore.compareAndSet(index, casCommand.getKey(), casCommand.getExpectedValue(), casCommand.getNewValue());
         setRemoved(removed, keyValue);
     }
 
-    private void applyDELCommand(long commandIndex, KayVeeCommand.DELCommand delCommand, SettableFuture<?> removed) throws KayVeeException {
-        localStore.delete(commandIndex, delCommand.getKey());
+    private void applyDELCommand(long index, KayVeeCommand.DELCommand delCommand, SettableFuture<?> removed) throws KayVeeException {
+        localStore.delete(index, delCommand.getKey());
         setRemoved(removed, null);
     }
 
     @SuppressWarnings("unchecked")
-    private <T> void setRemoved(SettableFuture<?> removed, T value) {
+    private <T> void setRemoved(SettableFuture<?> removed, @Nullable T value) {
         SettableFuture<T> commandFuture = (SettableFuture<T>) removed;
         commandFuture.set(value);
     }
@@ -276,36 +359,105 @@ public class DistributedStore implements Managed, RaftListener {
 
     // client-issued
 
+    /**
+     * Issue a {@link KayVeeCommand.NOPCommand}.
+     * This command will not modify the replicated storage's key-value state.
+     *
+     * @return future that will be triggered when the command is successfully
+     * <strong>committed</strong> to replicated storage or is <strong>known</strong>
+     * to have failed. This future <strong>may not</strong> be triggered. Callers
+     * are advised <strong>not</strong> to wait indefinitely, and instead, use
+     * timed waits.
+     */
     public ListenableFuture<Void> nop() {
         checkThatDistributedStoreIsActive();
         KayVeeCommand.NOPCommand nopCommand = new KayVeeCommand.NOPCommand(getCommandId());
         return issueCommandToCluster(nopCommand);
     }
 
+    /**
+     * Issue a {@link KayVeeCommand.GETCommand}.
+     * Returns the value associated with a key.
+     *
+     * @param key key for which to get the value
+     * @return future that will be triggered when the command is successfully
+     * <strong>committed</strong> to replicated storage or is <strong>known</strong>
+     * to have failed. This future <strong>may not</strong> be triggered. Callers
+     * are advised <strong>not</strong> to wait indefinitely, and instead, use
+     * timed waits.
+     */
     public ListenableFuture<KeyValue> get(String key) {
         checkThatDistributedStoreIsActive();
         KayVeeCommand.GETCommand getCommand = new KayVeeCommand.GETCommand(getCommandId(), key);
         return issueCommandToCluster(getCommand);
     }
 
+    /**
+     * Issue a {@link KayVeeCommand.ALLCommand}.
+     * Returns all the replicated {@code key=>value} pairs in the system.
+     *
+     * @return future that will be triggered when the command is successfully
+     * <strong>committed</strong> to replicated storage or is <strong>known</strong>
+     * to have failed. This future <strong>may not</strong> be triggered. Callers
+     * are advised <strong>not</strong> to wait indefinitely, and instead, use
+     * timed waits.
+     */
     public ListenableFuture<Collection<KeyValue>> getAll() {
         checkThatDistributedStoreIsActive();
         KayVeeCommand.ALLCommand allCommand = new KayVeeCommand.ALLCommand(getCommandId());
         return issueCommandToCluster(allCommand);
     }
 
+    /**
+     * Issue a {@link KayVeeCommand.SETCommand}.
+     * Set the value for a key.
+     *
+     * @param key key for which to set a value
+     * @param setValue instance of {@code SetValue} from which the new value is extracted
+     *                 the rules for a SET are specified in the KayVee README.md
+     * @return future that will be triggered when the command is successfully
+     * <strong>committed</strong> to replicated storage or is <strong>known</strong>
+     * to have failed. This future <strong>may not</strong> be triggered. Callers
+     * are advised <strong>not</strong> to wait indefinitely, and instead, use
+     * timed waits.
+     */
     public ListenableFuture<KeyValue> set(String key, SetValue setValue) {
         checkThatDistributedStoreIsActive();
         KayVeeCommand.SETCommand setCommand = new KayVeeCommand.SETCommand(getCommandId(), key, setValue.getNewValue());
         return issueCommandToCluster(setCommand);
     }
 
+    /**
+     * Issue a {@link KayVeeCommand.CASCommand}.
+     * Set the new value for a key iff its current value matches the expected value.
+     * This method can be used to create keys if the expected
+     * value is null, or delete keys if the new value is null.
+     *
+     * @param key key for which the CAS is performed
+     * @param setValue instance of {@code SetValue} from which the expected value and new value are extracted
+     *                 the rules for a CAS are specified in the KayVee README.md
+     * @return future that will be triggered when the command is successfully
+     * <strong>committed</strong> to replicated storage or is <strong>known</strong>
+     * to have failed. This future <strong>may not</strong> be triggered. Callers
+     * are advised <strong>not</strong> to wait indefinitely, and instead, use
+     * timed waits.
+     */
     public ListenableFuture<KeyValue> compareAndSet(String key, SetValue setValue) {
         checkThatDistributedStoreIsActive();
         KayVeeCommand.CASCommand casCommand = new KayVeeCommand.CASCommand(getCommandId(), key, setValue.getExpectedValue(), setValue.getNewValue());
         return issueCommandToCluster(casCommand);
     }
 
+    /**
+     * Issue a {@link KayVeeCommand.DELCommand}.
+     *
+     * @param key key to delete
+     * @return future that will be triggered when the command is successfully
+     * <strong>committed</strong> to replicated storage or is <strong>known</strong>
+     * to have failed. This future <strong>may not</strong> be triggered. Callers
+     * are advised <strong>not</strong> to wait indefinitely, and instead, use
+     * timed waits.
+     */
     public ListenableFuture<Void> delete(String key) {
         checkThatDistributedStoreIsActive();
         KayVeeCommand.DELCommand delCommand = new KayVeeCommand.DELCommand(getCommandId(), key);

@@ -28,19 +28,27 @@
 
 package io.libraft.kayvee.configuration;
 
+import io.libraft.kayvee.TestLoggingRule;
 import org.hamcrest.Matchers;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.MalformedURLException;
 
-public class ClusterMemberTest {
+public final class ClusterMemberTest {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ClusterMemberTest.class);
 
     private static final String CLUSTER_MEMBER_ID = "SELF";
 
     @Rule
-    public ExpectedException expectedException = ExpectedException.none();
+    public final ExpectedException expectedException = ExpectedException.none();
+
+    @Rule
+    public final TestLoggingRule loggingRule = new TestLoggingRule(LOGGER);
 
     @Test
     public void shouldThrowIfKayVeeURLWithoutASchemeIsUsed() {
