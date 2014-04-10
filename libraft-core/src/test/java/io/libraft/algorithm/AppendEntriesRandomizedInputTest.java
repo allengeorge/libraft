@@ -76,41 +76,41 @@ public final class AppendEntriesRandomizedInputTest {
     private final LogEntry[] LEADER_LOG = {
             SENTINEL(),
             NOOP(1, 1),
-            NOOP(2, 1),
-            NOOP(3, 2),
-            NOOP(4, 2),
-            NOOP(5, 2),
-            NOOP(6, 2), // <--- MATCHING PREFIX
-            NOOP(7, 5),
-            NOOP(8, 6),
-            NOOP(9, 6),
-            NOOP(10, 6),
-            NOOP(11, 6),
-            NOOP(12, 6),
-            NOOP(13, 6),
-            NOOP(14, 6),
-            NOOP(15, 6),
-            NOOP(16, 6),
-            NOOP(17, 6),
-            NOOP(18, 6),
-            NOOP(19, 8),
-            NOOP(20, 8),
-            NOOP(21, 8)
+            NOOP(1, 2),
+            NOOP(2, 3),
+            NOOP(2, 4),
+            NOOP(2, 5),
+            NOOP(2, 6), // <--- MATCHING PREFIX
+            NOOP(5, 7),
+            NOOP(6, 8),
+            NOOP(6, 9),
+            NOOP(6, 10),
+            NOOP(6, 11),
+            NOOP(6, 12),
+            NOOP(6, 13),
+            NOOP(6, 14),
+            NOOP(6, 15),
+            NOOP(6, 16),
+            NOOP(6, 17),
+            NOOP(6, 18),
+            NOOP(8, 19),
+            NOOP(8, 20),
+            NOOP(8, 21)
     };
 
     private static final LogEntry[] SELF_LOG = {
             SENTINEL(),
             NOOP(1, 1),
-            NOOP(2, 1),
-            NOOP(3, 2),
-            NOOP(4, 2),
-            NOOP(5, 2),
-            NOOP(6, 2), // <--- MATCHING PREFIX
-            NOOP(7, 3),
-            NOOP(8, 3),
-            NOOP(9, 3),
-            NOOP(10, 4),
-            NOOP(11, 4)
+            NOOP(1, 2),
+            NOOP(2, 3),
+            NOOP(2, 4),
+            NOOP(2, 5),
+            NOOP(2, 6), // <--- MATCHING PREFIX
+            NOOP(3, 7),
+            NOOP(3, 8),
+            NOOP(3, 9),
+            NOOP(4, 10),
+            NOOP(4, 11)
     };
 
     @Parameterized.Parameters
@@ -193,7 +193,7 @@ public final class AppendEntriesRandomizedInputTest {
     public void shouldApplyLeaderLogEntries() throws Exception {
         List<AppendEntries> appendEntriesRequests = generateAppendEntriesRequests();
         for (AppendEntries appendEntries : appendEntriesRequests) {
-            algorithm.onAppendEntries(appendEntries.server, appendEntries.term, appendEntries.commitIndex, appendEntries.prevLogIndex, appendEntries.prevLogTerm, appendEntries.entries);
+            algorithm.onAppendEntries(appendEntries.server, appendEntries.term, appendEntries.commitIndex, appendEntries.prevLogTerm, appendEntries.prevLogIndex, appendEntries.entries);
         }
 
         LogEntry lastLog = checkNotNull(log.getLast());
@@ -256,6 +256,6 @@ public final class AppendEntriesRandomizedInputTest {
             entries = null;
         }
 
-        return new AppendEntries(LEADER, CURRENT_TERM, STARTING_COMMIT_INDEX, prevLogIndex, prevLogTerm, entries);
+        return new AppendEntries(LEADER, CURRENT_TERM, STARTING_COMMIT_INDEX, prevLogTerm, prevLogIndex, entries);
     }
 }

@@ -32,6 +32,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Objects;
 
+import javax.annotation.Nullable;
 import javax.validation.Valid;
 
 /**
@@ -77,7 +78,7 @@ public final class RequestVoteReply extends RaftRPC {
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(@Nullable Object o) {
         if (o == null || !(o instanceof RequestVoteReply)) {
             return false;
         }

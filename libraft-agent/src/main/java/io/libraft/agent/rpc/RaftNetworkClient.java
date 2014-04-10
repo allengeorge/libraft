@@ -446,8 +446,8 @@ public final class RaftNetworkClient implements RPCSender {
     }
 
     @Override
-    public void requestVote(String server, long term, long lastLogIndex, long lastLogTerm) throws RPCException {
-        write(server, new RequestVote(self.getId(), server, term, lastLogIndex, lastLogTerm));
+    public void requestVote(String server, long term, long lastLogTerm, long lastLogIndex) throws RPCException {
+        write(server, new RequestVote(self.getId(), server, term, lastLogTerm, lastLogIndex));
     }
 
     @Override
@@ -456,8 +456,8 @@ public final class RaftNetworkClient implements RPCSender {
     }
 
     @Override
-    public void appendEntries(String server, long term, long commitIndex, long prevLogIndex, long prevLogTerm, @Nullable Collection<LogEntry> entries) throws RPCException {
-        write(server, new AppendEntries(self.getId(), server, term, commitIndex, prevLogIndex, prevLogTerm, entries));
+    public void appendEntries(String server, long term, long commitIndex, long prevLogTerm, long prevLogIndex, @Nullable Collection<LogEntry> entries) throws RPCException {
+        write(server, new AppendEntries(self.getId(), server, term, commitIndex, prevLogTerm, prevLogIndex, entries));
     }
 
     @Override

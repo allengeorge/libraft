@@ -26,7 +26,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package io.libraft.testlib;
+package io.libraft.algorithm;
 
 import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;

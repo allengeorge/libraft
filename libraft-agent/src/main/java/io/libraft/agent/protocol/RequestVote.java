@@ -32,6 +32,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Objects;
 
+import javax.annotation.Nullable;
 import javax.validation.constraints.Min;
 
 /**
@@ -39,16 +40,16 @@ import javax.validation.constraints.Min;
  */
 public final class RequestVote extends RaftRPC {
 
-    private static final String LAST_LOG_INDEX = "lastLogIndex";
     private static final String LAST_LOG_TERM = "lastLogTerm";
-
-    @Min(value = 0)
-    @JsonProperty(LAST_LOG_INDEX)
-    private final long lastLogIndex;
+    private static final String LAST_LOG_INDEX = "lastLogIndex";
 
     @Min(value = 0)
     @JsonProperty(LAST_LOG_TERM)
     private final long lastLogTerm;
+
+    @Min(value = 0)
+    @JsonProperty(LAST_LOG_INDEX)
+    private final long lastLogIndex;
 
     /**
      * Constructor.
@@ -56,30 +57,20 @@ public final class RequestVote extends RaftRPC {
      * @param source unique id of the Raft server that generated the message
      * @param destination unique id of the Raft server that is the intended recipient
      * @param term election term in which the message was generated
-     * @param lastLogIndex index of the last {@code LogEntry} in the {@code source} server's Raft log
      * @param lastLogTerm election term in which the {@code LogEntry} at {@code lastLogIndex} was created
      *
+     * @param lastLogIndex index of the last {@code LogEntry} in the {@code source} server's Raft log
      * @see io.libraft.algorithm.LogEntry
      */
     @JsonCreator
     public RequestVote(@JsonProperty(SOURCE) String source,
                        @JsonProperty(DESTINATION) String destination,
                        @JsonProperty(TERM) long term,
-                       @JsonProperty(LAST_LOG_INDEX) long lastLogIndex,
-                       @JsonProperty(LAST_LOG_TERM) long lastLogTerm) {
+                       @JsonProperty(LAST_LOG_TERM) long lastLogTerm,
+                       @JsonProperty(LAST_LOG_INDEX) long lastLogIndex) {
         super(source, destination, term);
-        this.lastLogIndex = lastLogIndex;
         this.lastLogTerm = lastLogTerm;
-    }
-
-    /**
-     * Get the last log index.
-     *
-     * @return index of the last {@link io.libraft.algorithm.LogEntry}
-     *         in the {@code source} server's Raft log
-     */
-    public long getLastLogIndex() {
-        return lastLogIndex;
+        this.lastLogIndex = lastLogIndex;
     }
 
     /**
@@ -92,13 +83,23 @@ public final class RequestVote extends RaftRPC {
         return lastLogTerm;
     }
 
-    @Override
-    public int hashCode() {
-        return Objects.hashCode(getSource(), getDestination(), getTerm(), lastLogIndex, lastLogTerm);
+    /**
+     * Get the last log index.
+     *
+     * @return index of the last {@link io.libraft.algorithm.LogEntry}
+     *         in the {@code source} server's Raft log
+     */
+    public long getLastLogIndex() {
+        return lastLogIndex;
     }
 
     @Override
-    public boolean equals(Object o) {
+    public int hashCode() {
+        return Objects.hashCode(getSource(), getDestination(), getTerm(), lastLogTerm, lastLogIndex);
+    }
+
+    @Override
+    public boolean equals(@Nullable Object o) {
         if (o == null || !(o instanceof RequestVote)) {
             return false;
         }
@@ -110,8 +111,8 @@ public final class RequestVote extends RaftRPC {
         return getSource().equalsIgnoreCase(other.getSource())
                 && getDestination().equalsIgnoreCase(other.getDestination())
                 && getTerm() == other.getTerm()
-                && lastLogIndex == other.lastLogIndex
-                && lastLogTerm == other.lastLogTerm;
+                && lastLogTerm == other.lastLogTerm
+                && lastLogIndex == other.lastLogIndex;
     }
 
     @Override
@@ -121,8 +122,8 @@ public final class RequestVote extends RaftRPC {
                 .add(SOURCE, getSource())
                 .add(DESTINATION, getDestination())
                 .add(TERM, getTerm())
-                .add(LAST_LOG_INDEX, lastLogIndex)
                 .add(LAST_LOG_TERM, lastLogTerm)
+                .add(LAST_LOG_INDEX, lastLogIndex)
                 .toString();
     }
 }

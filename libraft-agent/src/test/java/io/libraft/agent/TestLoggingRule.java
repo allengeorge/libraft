@@ -32,7 +32,7 @@ import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
 import org.slf4j.Logger;
 
-// FIXME (AG): Remove this class and depend on io.libraft.testlib.TestLoggingRule in libraft-core directly
+// FIXME (AG): Remove this class and depend on io.libraft.algorithm.TestLoggingRule in libraft-core directly
 //
 // This copy was done because as of gradle 1.8, attempting to publish multiple
 // artifacts from a single sub-project fails with the error:

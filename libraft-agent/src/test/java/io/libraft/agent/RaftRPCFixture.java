@@ -42,15 +42,15 @@ public abstract  class RaftRPCFixture {
     private RaftRPCFixture() { // to prevent instantiation
     }
 
-    public static final RequestVote REQUEST_VOTE = new RequestVote("SERVER_02", "SERVER_04", 32, 10, 31);
+    public static final RequestVote REQUEST_VOTE = new RequestVote("SERVER_02", "SERVER_04", 32, 31, 10);
 
     public static final RequestVoteReply REQUEST_VOTE_REPLY = new RequestVoteReply("SERVER_01", "SERVER_03", 9, false);
 
-    public static final AppendEntries APPEND_ENTRIES = new AppendEntries("SERVER_03", "SERVER_04", 32, 10, 17, 31,
-                    Lists.<LogEntry>newArrayList(
-                            new LogEntry.ClientEntry(18, 31, new UnitTestCommand()),
-                            new LogEntry.NoopEntry(19, 32),
-                            new LogEntry.NoopEntry(20, 32)));
+    public static final AppendEntries APPEND_ENTRIES = new AppendEntries("SERVER_03", "SERVER_04", 32, 10, 31, 17,
+            Lists.<LogEntry>newArrayList(
+                            new LogEntry.ClientEntry(31, 18, new UnitTestCommand()),
+                            new LogEntry.NoopEntry(32, 19),
+                            new LogEntry.NoopEntry(32, 20)));
 
     public static final AppendEntriesReply APPEND_ENTRIES_REPLY = new AppendEntriesReply("SERVER_01", "SERVER_02", 99, 92, 1, true);
 }

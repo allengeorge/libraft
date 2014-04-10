@@ -76,11 +76,11 @@ public final class JDBCLogTest {
 
     @Test
     public void shouldInsertAndRetrieveNoopEntry() throws StorageException {
-        long index = random.nextInt(100);
         long term = random.nextInt(100);
-        LOGGER.info("index:{} term:{}", index, term);
+        long index = random.nextInt(100);
+        LOGGER.info("term:{} index:{}", term, index);
 
-        LogEntry logEntry = new LogEntry.NoopEntry(index, term);
+        LogEntry logEntry = new LogEntry.NoopEntry(term, index);
         jdbcLog.put(logEntry);
 
         assertThat(jdbcLog.get(index), equalTo(logEntry));
@@ -88,11 +88,11 @@ public final class JDBCLogTest {
 
     @Test
     public void shouldInsertAndRetrieveConfigurationEntry() throws StorageException {
-        long index = random.nextInt(100);
         long term = random.nextInt(100);
-        LOGGER.info("index:{} term:{}", index, term);
+        long index = random.nextInt(100);
+        LOGGER.info("term:{} index:{}", term, index);
 
-        LogEntry logEntry = new LogEntry.ConfigurationEntry(index, term, Sets.<String>newHashSet(), Sets.<String>newHashSet());
+        LogEntry logEntry = new LogEntry.ConfigurationEntry(term, index, Sets.<String>newHashSet(), Sets.<String>newHashSet());
         jdbcLog.put(logEntry);
 
         assertThat(jdbcLog.get(index), equalTo(logEntry));
@@ -100,12 +100,12 @@ public final class JDBCLogTest {
 
     @Test
     public void shouldInsertAndRetrieveClientEntry() throws StorageException {
-        long index = random.nextInt(100);
         long term = random.nextInt(100);
+        long index = random.nextInt(100);
         String data = "TEST_01";
-        LOGGER.info("index:{} term:{} data:{}", index, term, data);
+        LOGGER.info("term:{} index:{} data:{}", term, index, data);
 
-        LogEntry logEntry = new LogEntry.ClientEntry(index, term, new UnitTestCommand(data));
+        LogEntry logEntry = new LogEntry.ClientEntry(term, index, new UnitTestCommand(data));
         jdbcLog.put(logEntry);
 
         assertThat(jdbcLog.get(index), equalTo(logEntry));
@@ -113,16 +113,16 @@ public final class JDBCLogTest {
 
     @Test
     public void shouldInsertAndRetrieveEntryEvenWhenUpdatedMultipleTimesV1() throws StorageException {
-        long index = random.nextInt(100);
         long term = random.nextInt(100);
-        LOGGER.info("index:{} term:{}", index, term);
+        long index = random.nextInt(100);
+        LOGGER.info("term:{} index:{}", term, index);
 
-        LogEntry lastInsertedEntry = new LogEntry.NoopEntry(index, term);
+        LogEntry lastInsertedEntry = new LogEntry.NoopEntry(term, index);
 
         // start by putting a client entry, and end off with a NOOP entry
-        jdbcLog.put(new LogEntry.ClientEntry(index, term, new UnitTestCommand("TEST_01")));
-        jdbcLog.put(new LogEntry.ConfigurationEntry(index, term, Sets.<String>newHashSet(), Sets.<String>newHashSet()));
-        jdbcLog.put(new LogEntry.ClientEntry(index, term, new UnitTestCommand("TEST_02")));
+        jdbcLog.put(new LogEntry.ClientEntry(term, index, new UnitTestCommand("TEST_01")));
+        jdbcLog.put(new LogEntry.ConfigurationEntry(term, index, Sets.<String>newHashSet(), Sets.<String>newHashSet()));
+        jdbcLog.put(new LogEntry.ClientEntry(term, index, new UnitTestCommand("TEST_02")));
         jdbcLog.put(lastInsertedEntry);
 
         assertThat(jdbcLog.get(index), equalTo(lastInsertedEntry));
@@ -130,17 +130,17 @@ public final class JDBCLogTest {
 
     @Test
     public void shouldInsertAndRetrieveEntryEvenWhenUpdatedMultipleTimesV2() throws StorageException {
-        long index = random.nextInt(100);
         long term = random.nextInt(100);
+        long index = random.nextInt(100);
         String data = "TEST_01";
-        LOGGER.info("index:{} term:{} data:{}", index, term, data);
+        LOGGER.info("term:{} index:{} data:{}", term, index, data);
 
-        LogEntry lastInsertedEntry = new LogEntry.ClientEntry(index, term, new UnitTestCommand("TEST_01"));
+        LogEntry lastInsertedEntry = new LogEntry.ClientEntry(term, index, new UnitTestCommand("TEST_01"));
 
         // start off with a NOOP entry and end with a client entry
-        jdbcLog.put(new LogEntry.NoopEntry(index, term));
-        jdbcLog.put(new LogEntry.ConfigurationEntry(index, term, Sets.<String>newHashSet(), Sets.<String>newHashSet()));
-        jdbcLog.put(new LogEntry.ClientEntry(index, term, new UnitTestCommand("TEST_02")));
+        jdbcLog.put(new LogEntry.NoopEntry(term, index));
+        jdbcLog.put(new LogEntry.ConfigurationEntry(term, index, Sets.<String>newHashSet(), Sets.<String>newHashSet()));
+        jdbcLog.put(new LogEntry.ClientEntry(term, index, new UnitTestCommand("TEST_02")));
         jdbcLog.put(lastInsertedEntry);
 
         assertThat(jdbcLog.get(index), equalTo(lastInsertedEntry));
@@ -153,12 +153,12 @@ public final class JDBCLogTest {
 
     @Test
     public void shouldReturnFirstValueWhenGetFirstIsCalled() throws StorageException {
-        LogEntry firstEntry = new LogEntry.NoopEntry(1, 3);
+        LogEntry firstEntry = new LogEntry.NoopEntry(3, 1);
 
         // notice that I've inserted the rows out of order
         jdbcLog.put(new LogEntry.ClientEntry(3, 3, new UnitTestCommand("LAST")));
         jdbcLog.put(firstEntry);
-        jdbcLog.put(new LogEntry.ClientEntry(2, 3, new UnitTestCommand("SECOND_LAST")));
+        jdbcLog.put(new LogEntry.ClientEntry(3, 2, new UnitTestCommand("SECOND_LAST")));
 
         assertThat(jdbcLog.getFirst(), equalTo(firstEntry));
     }
@@ -173,9 +173,9 @@ public final class JDBCLogTest {
         LogEntry lastEntry = new LogEntry.ClientEntry(3, 3, new UnitTestCommand("LAST"));
 
         // notice that I've inserted the rows out of order
-        jdbcLog.put(new LogEntry.NoopEntry(1, 3));
+        jdbcLog.put(new LogEntry.NoopEntry(3, 1));
         jdbcLog.put(lastEntry);
-        jdbcLog.put(new LogEntry.ClientEntry(2, 3, new UnitTestCommand("SECOND_LAST")));
+        jdbcLog.put(new LogEntry.ClientEntry(3, 2, new UnitTestCommand("SECOND_LAST")));
 
         assertThat(jdbcLog.getLast(), equalTo(lastEntry));
     }
@@ -184,44 +184,44 @@ public final class JDBCLogTest {
     public void shouldTruncateLogWhenIndexOfExistingEntryIsSpecified() throws StorageException {
         jdbcLog.put(LogEntry.SENTINEL);
         jdbcLog.put(new LogEntry.NoopEntry(1, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(2, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(3, 1)); // <--- expect this to be the last entry after truncation
-        jdbcLog.put(new LogEntry.NoopEntry(7, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(8, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(9, 1));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 2));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 3)); // <--- expect this to be the last entry after truncation
+        jdbcLog.put(new LogEntry.NoopEntry(1, 7));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 8));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 9));
 
         jdbcLog.truncate(7);
 
-        assertThat(jdbcLog.getLast(), Matchers.<LogEntry>equalTo(new LogEntry.NoopEntry(3, 1)));
+        assertThat(jdbcLog.getLast(), Matchers.<LogEntry>equalTo(new LogEntry.NoopEntry(1, 3)));
     }
 
     @Test
     public void shouldTruncateLogIfIndexNotEqualToExistingEntryIndexIsSpecified() throws StorageException {
         jdbcLog.put(LogEntry.SENTINEL);
         jdbcLog.put(new LogEntry.NoopEntry(1, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(2, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(3, 1)); // <--- expect this to be the last entry after truncation
-        jdbcLog.put(new LogEntry.NoopEntry(7, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(8, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(9, 1));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 2));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 3)); // <--- expect this to be the last entry after truncation
+        jdbcLog.put(new LogEntry.NoopEntry(1, 7));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 8));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 9));
 
         jdbcLog.truncate(6); // notice how I specified an index that doesn't exist
 
-        assertThat(jdbcLog.getLast(), Matchers.<LogEntry>equalTo(new LogEntry.NoopEntry(3, 1)));
+        assertThat(jdbcLog.getLast(), Matchers.<LogEntry>equalTo(new LogEntry.NoopEntry(1, 3)));
     }
 
     @Test
     public void shouldNotTruncateLogIfIndexGreaterThanLastLogEntryIsSpecified() throws StorageException {
         jdbcLog.put(LogEntry.SENTINEL);
         jdbcLog.put(new LogEntry.NoopEntry(1, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(2, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(3, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(7, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(8, 1));
-        jdbcLog.put(new LogEntry.NoopEntry(9, 1)); // <--- expect this to be the last entry after truncation
+        jdbcLog.put(new LogEntry.NoopEntry(1, 2));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 3));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 7));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 8));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 9)); // <--- expect this to be the last entry after truncation
 
         jdbcLog.truncate(11);
 
-        assertThat(jdbcLog.getLast(), Matchers.<LogEntry>equalTo(new LogEntry.NoopEntry(9, 1)));
+        assertThat(jdbcLog.getLast(), Matchers.<LogEntry>equalTo(new LogEntry.NoopEntry(1, 9)));
     }
 }

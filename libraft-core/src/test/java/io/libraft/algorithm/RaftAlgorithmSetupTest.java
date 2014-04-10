@@ -30,7 +30,6 @@ package io.libraft.algorithm;
 
 import com.google.common.collect.Sets;
 import io.libraft.RaftListener;
-import io.libraft.testlib.TestLoggingRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -97,7 +96,7 @@ public final class RaftAlgorithmSetupTest {
     @Test
     public void shouldSucceedConstructionWithLog() throws StorageException {
         when(log.getFirst()).thenReturn(SENTINEL());
-        when(log.getLast()).thenReturn(NOOP(3, 1));
+        when(log.getLast()).thenReturn(NOOP(1, 3));
         when(store.getCurrentTerm()).thenReturn(1L);
         when(store.getCommitIndex()).thenReturn(0L);
 
@@ -106,9 +105,9 @@ public final class RaftAlgorithmSetupTest {
 
     @Test
     public void shouldSucceedConstructionWithLogAndSnapshotWithOverlap0() throws StorageException {
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(6, 3));
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(3, 6));
         when(log.getFirst()).thenReturn(SENTINEL()); // starts at beginning
-        when(log.getLast()).thenReturn(NOOP(9, 3));
+        when(log.getLast()).thenReturn(NOOP(3, 9));
         when(store.getCurrentTerm()).thenReturn(3L);
         when(store.getCommitIndex()).thenReturn(6L);
 
@@ -117,9 +116,9 @@ public final class RaftAlgorithmSetupTest {
 
     @Test
     public void shouldSucceedConstructionWithLogAndSnapshotWithOverlap1() throws StorageException {
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(6, 3));
-        when(log.getFirst()).thenReturn(NOOP(4, 1)); // doesn't start at beginning
-        when(log.getLast()).thenReturn(NOOP(9, 3));
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(3, 6));
+        when(log.getFirst()).thenReturn(NOOP(1, 4)); // doesn't start at beginning
+        when(log.getLast()).thenReturn(NOOP(3, 9));
         when(store.getCurrentTerm()).thenReturn(3L);
         when(store.getCommitIndex()).thenReturn(6L);
 
@@ -128,9 +127,9 @@ public final class RaftAlgorithmSetupTest {
 
     @Test
     public void shouldSucceedConstructionWithLogAndSnapshotWithNoOverlap() throws StorageException {
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(6, 3));
-        when(log.getFirst()).thenReturn(NOOP(7, 3)); // right after end of snapshot
-        when(log.getLast()).thenReturn(NOOP(9, 3));
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(3, 6));
+        when(log.getFirst()).thenReturn(NOOP(3, 7)); // right after end of snapshot
+        when(log.getLast()).thenReturn(NOOP(3, 9));
         when(store.getCurrentTerm()).thenReturn(3L);
         when(store.getCommitIndex()).thenReturn(6L);
 
@@ -158,7 +157,7 @@ public final class RaftAlgorithmSetupTest {
     @Test
     public void shouldFailToStartIfLastLogTermGreaterThanCurrentTerm() throws StorageException {
         when(log.getFirst()).thenReturn(SENTINEL());
-        when(log.getLast()).thenReturn(NOOP(2, 3));
+        when(log.getLast()).thenReturn(NOOP(3, 2));
         when(store.getCurrentTerm()).thenReturn(1L);
         when(store.getCommitIndex()).thenReturn(0L);
 
@@ -170,7 +169,7 @@ public final class RaftAlgorithmSetupTest {
 
     @Test
     public void shouldFailToStartIfLastSnapshotTermGreaterThanCurrentTerm() throws StorageException {
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(2, 3));
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(3, 2));
         when(store.getCurrentTerm()).thenReturn(1L);
         when(store.getCommitIndex()).thenReturn(2L);
 
@@ -196,7 +195,7 @@ public final class RaftAlgorithmSetupTest {
     @Test
     public void shouldFailToStartIfCommitIndexGreaterThanLastLogIndex() throws StorageException {
         when(log.getFirst()).thenReturn(SENTINEL());
-        when(log.getLast()).thenReturn(NOOP(2, 1));
+        when(log.getLast()).thenReturn(NOOP(1, 2));
         when(store.getCurrentTerm()).thenReturn(1L);
         when(store.getCommitIndex()).thenReturn(3L);
 
@@ -208,7 +207,7 @@ public final class RaftAlgorithmSetupTest {
 
     @Test
     public void shouldFailToStartIfCommitIndexGreaterThanLastAppliedIndexInSnapshot() throws StorageException {
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(2, 1));
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(1, 2));
         when(store.getCurrentTerm()).thenReturn(1L);
         when(store.getCommitIndex()).thenReturn(3L);
 
@@ -221,7 +220,7 @@ public final class RaftAlgorithmSetupTest {
     @Test
     public void shouldFailToStartIfFirstLogNotSentinelAndNoSnapshot() throws StorageException {
         when(log.getFirst()).thenReturn(NOOP(1, 1));
-        when(log.getLast()).thenReturn(NOOP(2, 1));
+        when(log.getLast()).thenReturn(NOOP(1, 2));
         when(store.getCurrentTerm()).thenReturn(1L);
         when(store.getCommitIndex()).thenReturn(2L);
 
@@ -233,9 +232,9 @@ public final class RaftAlgorithmSetupTest {
 
     @Test
     public void shouldFailToStartIfThereIsAHoleBetweenTheLatestSnapshotAndTheFirstLogEntry() throws StorageException {
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(7, 1));
-        when(log.getFirst()).thenReturn(NOOP(9, 1));
-        when(log.getLast()).thenReturn(NOOP(14, 2));
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(1, 7));
+        when(log.getFirst()).thenReturn(NOOP(1, 9));
+        when(log.getLast()).thenReturn(NOOP(2, 14));
         when(store.getCurrentTerm()).thenReturn(2L);
         when(store.getCommitIndex()).thenReturn(7L); // has to be at least as large as the snapshot
 
@@ -247,7 +246,7 @@ public final class RaftAlgorithmSetupTest {
 
     @Test
     public void shouldFailToStartIfCommitIndexLessThanLastAppliedIndexInSnapshot() throws StorageException {
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(7, 1)); // only a snapshot and empty log
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(1, 7)); // only a snapshot and empty log
         when(store.getCurrentTerm()).thenReturn(1L);
         when(store.getCommitIndex()).thenReturn(6L);
 
@@ -259,9 +258,9 @@ public final class RaftAlgorithmSetupTest {
 
     @Test
     public void shouldFailToStartIfLastAppliedIndexInSnapshotGreaterThanLastLogEntry() throws StorageException {
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(7, 1));
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(1, 7));
         when(log.getFirst()).thenReturn(NOOP(1, 1));
-        when(log.getLast()).thenReturn(NOOP(6, 1));
+        when(log.getLast()).thenReturn(NOOP(1, 6));
         when(store.getCurrentTerm()).thenReturn(1L);
         when(store.getCommitIndex()).thenReturn(7L);
 

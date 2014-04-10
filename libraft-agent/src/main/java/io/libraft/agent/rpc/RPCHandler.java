@@ -96,8 +96,7 @@ final class RPCHandler extends SimpleChannelUpstreamHandler {
                 receiver.onRequestVote(
                         requestVote.getSource(),
                         requestVote.getTerm(),
-                        requestVote.getLastLogIndex(),
-                        requestVote.getLastLogTerm()
+                        requestVote.getLastLogTerm(), requestVote.getLastLogIndex()
                 );
 
             } else if (rpc instanceof RequestVoteReply) {
@@ -113,8 +112,7 @@ final class RPCHandler extends SimpleChannelUpstreamHandler {
                         appendEntries.getSource(),
                         appendEntries.getTerm(),
                         appendEntries.getCommitIndex(),
-                        appendEntries.getPrevLogIndex(),
-                        appendEntries.getPrevLogTerm(),
+                        appendEntries.getPrevLogTerm(), appendEntries.getPrevLogIndex(),
                         appendEntries.getEntries());
 
             } else {

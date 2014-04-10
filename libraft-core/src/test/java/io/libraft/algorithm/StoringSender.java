@@ -56,13 +56,13 @@ class StoringSender implements RPCSender {
 
     static final class RequestVote extends RPCCall {
 
-        final long lastLogIndex;
         final long lastLogTerm;
+        final long lastLogIndex;
 
-        public RequestVote(String server, long term, long lastLogIndex, long lastLogTerm) {
+        public RequestVote(String server, long term, long lastLogTerm, long lastLogIndex) {
             super(server, term);
-            this.lastLogIndex = lastLogIndex;
             this.lastLogTerm = lastLogTerm;
+            this.lastLogIndex = lastLogIndex;
         }
 
         @Override
@@ -71,8 +71,8 @@ class StoringSender implements RPCSender {
                     .toStringHelper(this)
                     .add("server", server)
                     .add("term", term)
-                    .add("lastLogIndex", lastLogIndex)
                     .add("lastLogTerm", lastLogTerm)
+                    .add("lastLogIndex", lastLogIndex)
                     .toString();
         }
     }
@@ -100,11 +100,11 @@ class StoringSender implements RPCSender {
     static final class AppendEntries extends RPCCall {
 
         final long commitIndex;
-        final long prevLogIndex;
         final long prevLogTerm;
+        final long prevLogIndex;
         final Collection<LogEntry> entries;
 
-        public AppendEntries(String server, long term, long commitIndex, long prevLogIndex, long prevLogTerm, Collection<LogEntry> entries) {
+        public AppendEntries(String server, long term, long commitIndex, long prevLogTerm, long prevLogIndex, @Nullable Collection<LogEntry> entries) {
             super(server, term);
             this.prevLogIndex = prevLogIndex;
             this.prevLogTerm = prevLogTerm;
@@ -119,8 +119,8 @@ class StoringSender implements RPCSender {
                     .add("server", server)
                     .add("term", term)
                     .add("commitIndex", commitIndex)
-                    .add("prevLogIndex", prevLogIndex)
                     .add("prevLogTerm", prevLogTerm)
+                    .add("prevLogIndex", prevLogIndex)
                     .add("entries", entries)
                     .toString();
         }
@@ -192,8 +192,8 @@ class StoringSender implements RPCSender {
     //
 
     @Override
-    public void requestVote(String server, long term, long lastLogIndex, long lastLogTerm) throws RPCException {
-        rpcCalls.add(new RequestVote(server, term, lastLogIndex, lastLogTerm));
+    public void requestVote(String server, long term, long lastLogTerm, long lastLogIndex) throws RPCException {
+        rpcCalls.add(new RequestVote(server, term, lastLogTerm, lastLogIndex));
     }
 
     @Override
@@ -202,8 +202,8 @@ class StoringSender implements RPCSender {
     }
 
     @Override
-    public void appendEntries(String server, long term, long commitIndex, long prevLogIndex, long prevLogTerm, @Nullable Collection<LogEntry> entries) throws RPCException {
-        rpcCalls.add(new AppendEntries(server, term, commitIndex, prevLogIndex, prevLogTerm, entries));
+    public void appendEntries(String server, long term, long commitIndex, long prevLogTerm, long prevLogIndex, @Nullable Collection<LogEntry> entries) throws RPCException {
+        rpcCalls.add(new AppendEntries(server, term, commitIndex, prevLogTerm, prevLogIndex, entries));
     }
 
     @Override

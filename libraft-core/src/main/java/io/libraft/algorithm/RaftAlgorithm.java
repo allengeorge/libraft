@@ -267,6 +267,49 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         APPLYING
     }
 
+    private final class LogicalTimestamp {
+
+        private long term;
+        private long index;
+
+        private LogicalTimestamp(long term, long index) {
+            this.term = term;
+            this.index = index;
+        }
+
+        public long getTerm() {
+            return term;
+        }
+
+        public long getIndex() {
+            return index;
+        }
+
+        @Override
+        public boolean equals(@Nullable Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            LogicalTimestamp other = (LogicalTimestamp) o;
+
+            return term == other.getTerm() && index == other.getIndex();
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(term, index);
+        }
+
+        @Override
+        public String toString() {
+            return Objects
+                    .toStringHelper(this)
+                    .add("term", term)
+                    .add("index", index)
+                    .toString();
+        }
+    }
+
     // Holds information about each server in the Raft cluster.
     private final class ServerDatum {
 
@@ -963,7 +1006,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             // we're resilient to duplicate RequestVote
             if (!votedServers.containsKey(server)) {
                 try {
-                    sender.requestVote(server, electionTerm, lastLogIndex, lastLogTerm);
+                    sender.requestVote(server, electionTerm, lastLogTerm, lastLogIndex);
                 } catch (RPCException e) {
                     LOGGER.warn("{}: fail send RequestVote to {} for term {} cause:{}", self, server, electionTerm, e.getMessage());
                 }
@@ -1162,7 +1205,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         // it may be that there are people out there with more entries than I,
         // or fewer entries than I. by starting off early I can get everyone up
         // to speed more quickly and get a more accurate picture of their prefixes
-        log.put(new LogEntry.NoopEntry(lastLogIndex + 1, currentTerm));
+        log.put(new LogEntry.NoopEntry(currentTerm, lastLogIndex + 1));
 
         // send out the first heartbeat
         heartbeat(currentTerm);
@@ -1221,7 +1264,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             }
 
             try {
-                sender.appendEntries(server, currentTerm, commitIndex, prevLogIndex, prevLogTerm, entries);
+                sender.appendEntries(server, currentTerm, commitIndex, prevLogTerm, prevLogIndex, entries);
             } catch (RPCException e) {
                 LOGGER.warn("{}: fail send heartbeat with {} entries to {} cause:{}", self, getEntryCount(entries), server, e.getMessage());
             }
@@ -1255,8 +1298,8 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     //
 
     @Override
-    public synchronized void onRequestVote(String server, long term, long lastLogIndex, long lastLogTerm) {
-        LOGGER.trace("{}: RequestVote from {}: term:{} lastLogIndex:{} lastLogTerm:{}", self, server, term, lastLogIndex, lastLogTerm);
+    public synchronized void onRequestVote(String server, long term, long lastLogTerm, long lastLogIndex) {
+        LOGGER.trace("{}: RequestVote from {}: term:{} lastLogTerm:{} lastLogIndex:{}", self, server, term, lastLogTerm, lastLogIndex);
 
         if (!running) {
             logNotRunning();
@@ -1265,8 +1308,8 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
         try {
             checkArgument(term >= 1);
-            checkArgument(lastLogIndex >= 0);
             checkArgument(lastLogTerm >= 0);
+            checkArgument(lastLogIndex >= 0);
 
             long currentTerm = store.getCurrentTerm();
 
@@ -1288,7 +1331,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
             String votedFor = store.getVotedFor(term);
             LogEntry selfLastLog = checkNotNull(log.getLast());
-            int candidateLogDominates = doesLogDominate(lastLogIndex, lastLogTerm, selfLastLog.getIndex(), selfLastLog.getTerm());
+            int candidateLogDominates = doesLogDominate(lastLogTerm, lastLogIndex, selfLastLog.getTerm(), selfLastLog.getIndex());
             boolean voteGranted = false;
 
             // you can grant the vote if:
@@ -1322,7 +1365,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         }
     }
 
-    private int doesLogDominate(long lastLogIndex0, long lastLogTerm0, long lastLogIndex1, long lastLogTerm1) {
+    private int doesLogDominate(long lastLogTerm0, long lastLogIndex0, long lastLogTerm1, long lastLogIndex1) {
         if (lastLogTerm0 < lastLogTerm1) {
             return -1;
         }
@@ -1400,9 +1443,9 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     //
 
     @Override
-    public synchronized void onAppendEntries(String server, long term, long commitIndex, long prevLogIndex, long prevLogTerm, @Nullable Collection<LogEntry> entries) {
-        LOGGER.trace("{}: AppendEntries from {}: term:{} commitIndex:{} prevLogIndex:{} prevLogTerm:{} entryCount:{}",
-                self, server, term, commitIndex, prevLogIndex, prevLogTerm, getEntryCount(entries));
+    public synchronized void onAppendEntries(String server, long term, long commitIndex, long prevLogTerm, long prevLogIndex, @Nullable Collection<LogEntry> entries) {
+        LOGGER.trace("{}: AppendEntries from {}: term:{} commitIndex:{} prevLogTerm:{} prevLogIndex:{} entryCount:{}",
+                self, server, term, commitIndex, prevLogTerm, prevLogIndex, getEntryCount(entries));
 
         if (!running) {
             logNotRunning();
@@ -1412,8 +1455,8 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         try {
             checkArgument(term >= 1);
             checkArgument(commitIndex >= 0);
-            checkArgument(prevLogIndex >= 0);
             checkArgument(prevLogTerm >= 0);
+            checkArgument(prevLogIndex >= 0);
             checkArgument(entries == null || entries.size() > 0);
 
             // deal with heartbeats specially by creating an empty
@@ -1981,7 +2024,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         LogEntry prevClientLog = log.get(clientLogIndex);
         checkState(prevClientLog == null, "overwrote %s at index %s in term %s", prevClientLog, clientLogIndex, currentTerm);
 
-        LogEntry.ClientEntry clientLog = new LogEntry.ClientEntry(clientLogIndex, currentTerm, command);
+        LogEntry.ClientEntry clientLog = new LogEntry.ClientEntry(currentTerm, clientLogIndex, command);
         log.put(clientLog);
 
         CommandDatum prevCommandDatum = commands.put(clientLog.getIndex(), new CommandDatum(clientLog, commandFuture));
@@ -2009,7 +2052,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             LogEntry serverPrevLog = checkNotNull(log.get(serverPrevLogIndex));
 
             try {
-                sender.appendEntries(server, currentTerm, commitIndex, serverPrevLog.getIndex(), serverPrevLog.getTerm(), entries);
+                sender.appendEntries(server, currentTerm, commitIndex, serverPrevLog.getTerm(), serverPrevLog.getIndex(), entries);
             } catch (RPCException e) {
                 LOGGER.warn("{}: fail send AppendEntries with {} entries cause:{}", server, getEntryCount(entries), e.getMessage());
             }

@@ -60,10 +60,10 @@ public interface RPCReceiver {
      *
      * @param server unique id of the Raft server that sent this message
      * @param term election term in which this message was sent
-     * @param lastLogIndex index of the last log entry in the Raft server's Raft log at the time the message was sent
      * @param lastLogTerm election term in which the last log entry in the Raft server's Raft log was created
+     * @param lastLogIndex index of the last log entry in the Raft server's Raft log at the time the message was sent
      */
-    void onRequestVote(String server, long term, long lastLogIndex, long lastLogTerm);
+    void onRequestVote(String server, long term, long lastLogTerm, long lastLogIndex);
 
     /**
      * Indicates that a RequestVoteReply was received. This is a response to a previously-sent RequestVote message.
@@ -82,15 +82,15 @@ public interface RPCReceiver {
      * @param commitIndex index of the last {@code LogEntry} that {@code server} believes is committed.
      *                    {@code commitIndex} <strong>may</strong> be >= the local Raft server's log length
      *                    even after all {@code entries} are successfully appended
-     * @param prevLogIndex index of the {@code LogEntry} immediately before the first {@code LogEntry} in {@code entries}
      * @param prevLogTerm election term in which the {@code LogEntry} at {@code prevLogIndex} was created
+     * @param prevLogIndex index of the {@code LogEntry} immediately before the first {@code LogEntry} in {@code entries}
      * @param entries sequence of monotonic, gapless, {@code LogEntry} instances with
      *                indices {@code prevLogIndex + 1}, {@code prevLogIndex + 2} .. {@code prevLogIndex + entries.count()}.
      *                May be {@code null} if this AppendEntries message is a heartbeat
      *
      * @see LogEntry
      */
-    void onAppendEntries(String server, long term, long commitIndex, long prevLogIndex, long prevLogTerm, @Nullable Collection<LogEntry> entries);
+    void onAppendEntries(String server, long term, long commitIndex, long prevLogTerm, long prevLogIndex, @Nullable Collection<LogEntry> entries);
 
     /**
      * Indicates that an AppendEntriesReply was received. This is a response to previously-sent AppendEntries message.

@@ -38,7 +38,6 @@ import io.libraft.NotLeaderException;
 import io.libraft.RaftListener;
 import io.libraft.ReplicationException;
 import io.libraft.Snapshot;
-import io.libraft.testlib.TestLoggingRule;
 import org.hamcrest.Description;
 import org.hamcrest.Matcher;
 import org.hamcrest.TypeSafeMatcher;
@@ -252,11 +251,11 @@ public final class RaftAlgorithmTest {
         assertThat(sender.getCalls().toString(), sender.hasNext(), equalTo(false));
     }
 
-    private void assertThatRequestVotesHaveValues(Collection<RequestVote> requestVotes, long term, long lastLogIndex, long lastLogTerm) {
+    private void assertThatRequestVotesHaveValues(Collection<RequestVote> requestVotes, long term, long lastLogTerm, long lastLogIndex) {
         for(RequestVote requestVote : requestVotes) {
             assertThat(requestVote.term, equalTo(term));
-            assertThat(requestVote.lastLogIndex, equalTo(lastLogIndex));
             assertThat(requestVote.lastLogTerm, equalTo(lastLogTerm));
+            assertThat(requestVote.lastLogIndex, equalTo(lastLogIndex));
         }
     }
 
@@ -266,17 +265,17 @@ public final class RaftAlgorithmTest {
         assertThat(requestVoteReply.voteGranted, equalTo(voteGranted));
     }
 
-    private void assertThatAppendEntriesHaveValues(Collection<AppendEntries> appendEntries, long term, long commitIndex, long prevLogIndex, long prevLogTerm, LogEntry... entries) {
+    private void assertThatAppendEntriesHaveValues(Collection<AppendEntries> appendEntries, long term, long commitIndex, long prevLogTerm, long prevLogIndex, LogEntry... entries) {
         for(AppendEntries request : appendEntries) {
-            assertThatAppendEntriesHasValues(request, term, commitIndex, prevLogIndex, prevLogTerm, entries);
+            assertThatAppendEntriesHasValues(request, term, commitIndex, prevLogTerm, prevLogIndex, entries);
         }
     }
 
-    private void assertThatAppendEntriesHasValues(AppendEntries request, long term, long commitIndex, long prevLogIndex, long prevLogTerm, LogEntry... entries) {
+    private void assertThatAppendEntriesHasValues(AppendEntries request, long term, long commitIndex, long prevLogTerm, long prevLogIndex, LogEntry... entries) {
         assertThat(request.term, equalTo(term));
         assertThat(request.commitIndex, equalTo(commitIndex));
-        assertThat(request.prevLogIndex, equalTo(prevLogIndex));
         assertThat(request.prevLogTerm, equalTo(prevLogTerm));
+        assertThat(request.prevLogIndex, equalTo(prevLogIndex));
         if (entries.length == 0) {
             assertThat(request.entries, nullValue());
         } else {
@@ -429,8 +428,8 @@ public final class RaftAlgorithmTest {
         insertIntoLog(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2)
+                NOOP(1, 2),
+                NOOP(2, 3)
         );
 
         algorithm.becomeFollower(2, null);
@@ -440,14 +439,14 @@ public final class RaftAlgorithmTest {
 
         Collection<RequestVote> requestVotes = getRPCs(4, RequestVote.class);
         assertThatRPCsSentTo(requestVotes, S_01, S_02, S_03, S_04);
-        assertThatRequestVotesHaveValues(requestVotes, 3, 3, 2);
+        assertThatRequestVotesHaveValues(requestVotes, 3, 2, 3);
         assertThatNoMoreRPCsWereSent();
 
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2)
+                NOOP(1, 2),
+                NOOP(2, 3)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -489,8 +488,8 @@ public final class RaftAlgorithmTest {
         insertIntoLog(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2)
+                NOOP(1, 2),
+                NOOP(2, 3)
         );
 
         algorithm.becomeFollower(2, null);
@@ -500,7 +499,7 @@ public final class RaftAlgorithmTest {
 
         Collection<RequestVote> requestVotes = getRPCs(4, RequestVote.class);
         assertThatRPCsSentTo(requestVotes, S_01, S_02, S_03, S_04);
-        assertThatRequestVotesHaveValues(requestVotes, 3, 3, 2);
+        assertThatRequestVotesHaveValues(requestVotes, 3, 2, 3);
         assertThatNoMoreRPCsWereSent();
 
         // send back positive replies from 2 nodes
@@ -518,15 +517,15 @@ public final class RaftAlgorithmTest {
         // and that we sent out heartbeats confirming this
         Collection<AppendEntries> heartbeats = getRPCs(4, AppendEntries.class);
         assertThatRPCsSentTo(heartbeats, S_01, S_02, S_03, S_04);
-        assertThatAppendEntriesHaveValues(heartbeats, 3, 0, 3, 2, NOOP(4, 3));
+        assertThatAppendEntriesHaveValues(heartbeats, 3, 0, 2, 3, NOOP(3, 4));
         assertThatNoMoreRPCsWereSent();
 
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 3) // this NOOP is sent out immediately once we become the leader
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(3, 4) // this NOOP is sent out immediately once we become the leader
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -793,7 +792,7 @@ public final class RaftAlgorithmTest {
 
         // get a Request Vote with a greater term and a greater prevLogTerm
         // check that the vote was granted, and that we've shifted our state
-        algorithm.onRequestVote(S_01, 6, 1, 5);
+        algorithm.onRequestVote(S_01, 6, 5, 1);
         assertThatStateAfterRequestVoteIs(6, S_01, FOLLOWER);
 
         RequestVoteReply requestVoteReply = sender.nextAndRemove(RequestVoteReply.class);
@@ -808,7 +807,7 @@ public final class RaftAlgorithmTest {
         // and that our final state is sane
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3) // the NOOP that we issued on becoming the leader
+                NOOP(3, 1) // the NOOP that we issued on becoming the leader
         );
         assertThatTermAndCommitIndexHaveValues(6, 0);
     }
@@ -922,7 +921,7 @@ public final class RaftAlgorithmTest {
 
         // receive a heartbeat from a server for a term greater than this term
         // notice that the prefix does not match and the commit index has been bumped up
-        algorithm.onAppendEntries(S_03, 4, 1, 1, 4, null);
+        algorithm.onAppendEntries(S_03, 4, 1, 4, 1, null);
 
         // regardless of that, check that we become a follower for this guy
         // and that we reschedule our election timeout
@@ -1006,14 +1005,14 @@ public final class RaftAlgorithmTest {
         insertIntoLog(
                 NOOP(1, 1),
                 NOOP(2, 2),
-                NOOP(3, 2),
-                NOOP(4, 2)
+                NOOP(2, 3),
+                NOOP(2, 4)
         );
 
         algorithm.becomeFollower(3, null);
         assertThatSelfTransitionedToFollower(3, 0, null, false);
 
-        algorithm.onRequestVote(S_01, 3, 4, 1); // we have entries from a more recent term than he does
+        algorithm.onRequestVote(S_01, 3, 1, 4); // we have entries from a more recent term than he does
         assertThatStateAfterRequestVoteIs(3, null, FOLLOWER);
 
         RequestVoteReply requestVoteReply = sender.nextAndRemove(RequestVoteReply.class);
@@ -1024,8 +1023,8 @@ public final class RaftAlgorithmTest {
                 SENTINEL(),
                 NOOP(1, 1),
                 NOOP(2, 2),
-                NOOP(3, 2),
-                NOOP(4, 2)
+                NOOP(2, 3),
+                NOOP(2, 4)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -1035,15 +1034,15 @@ public final class RaftAlgorithmTest {
         insertIntoLog(
                 NOOP(1, 1),
                 NOOP(2, 2),
-                NOOP(3, 2),
-                NOOP(4, 2),
-                NOOP(5, 2) // additional entry
+                NOOP(2, 3),
+                NOOP(2, 4),
+                NOOP(2, 5) // additional entry
         );
 
         algorithm.becomeFollower(3, null);
         assertThatSelfTransitionedToFollower(3, 0, null, false);
 
-        algorithm.onRequestVote(S_01, 3, 4, 2); // we have more entries for the last term than he does
+        algorithm.onRequestVote(S_01, 3, 2, 4); // we have more entries for the last term than he does
         assertThatStateAfterRequestVoteIs(3, null, FOLLOWER);
 
         RequestVoteReply requestVoteReply = sender.nextAndRemove(RequestVoteReply.class);
@@ -1054,9 +1053,9 @@ public final class RaftAlgorithmTest {
                 SENTINEL(),
                 NOOP(1, 1),
                 NOOP(2, 2),
-                NOOP(3, 2),
-                NOOP(4, 2),
-                NOOP(5, 2)
+                NOOP(2, 3),
+                NOOP(2, 4),
+                NOOP(2, 5)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -1066,7 +1065,7 @@ public final class RaftAlgorithmTest {
         algorithm.becomeCandidate(3);
         assertThatSelfTransitionedToCandidate(3, 0);
 
-        algorithm.onRequestVote(S_01, 3, 8, 2); // they have a more up-to-date log prefix than we do
+        algorithm.onRequestVote(S_01, 3, 2, 8); // they have a more up-to-date log prefix than we do
         assertThatStateAfterRequestVoteIs(3, S_01, FOLLOWER);
 
         RequestVoteReply requestVoteReply = sender.nextAndRemove(RequestVoteReply.class);
@@ -1162,7 +1161,7 @@ public final class RaftAlgorithmTest {
         algorithm.becomeCandidate(3);
         assertThatSelfTransitionedToCandidate(3, 0);
 
-        algorithm.onAppendEntries(S_01, 3, 2, 3, 1, null);
+        algorithm.onAppendEntries(S_01, 3, 2, 1, 3, null);
 
         assertThat(store.getVotedFor(3), equalTo(SELF));
         assertThat(algorithm.getRole(), equalTo(FOLLOWER));
@@ -1208,11 +1207,11 @@ public final class RaftAlgorithmTest {
     @Test
     public void shouldIgnoreAppendEntriesWithLowerTermForSameLeader() throws StorageException, RPCException {
         // S_02 is the leader in term 2
-        // S_02 issues an AppendEntries for (index, term) (1, 2)
+        // S_02 issues an AppendEntries for (term, index) (2, 1)
         // S_02 crashes, reboots and gets re-elected as leader (term is now 3)
         // SELF receives knowledge (for example, RequestVote, etc.) about term 3
         // SELF then receives the old AppendEntries request, issued before S_02 crashed
-        // S_02 re-issues an AppendEntries for (index, term) (5, 2)
+        // S_02 re-issues an AppendEntries for (term, index) (2, 5)
         // SELF should simply ignore this old request,
         // otherwise it will send back 'false', forcing S_02 to decrement nextIndex
 
@@ -1284,7 +1283,7 @@ public final class RaftAlgorithmTest {
     // FIXME (AG): this test is broken
     @Test
     public void shouldIgnoreDuplicateDelayedAppendEntriesReplyForLowerTerm() throws StorageException, RPCException {
-        insertIntoLog(NOOP(1, 2));
+        insertIntoLog(NOOP(2, 1));
         insertIntoLog(NOOP(2, 2));
 
         becomeLeaderInTerm(3, false);
@@ -1314,7 +1313,7 @@ public final class RaftAlgorithmTest {
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_04)) { // we know for sure that they don't have the entry at 2, 2
-                assertThatAppendEntriesHasValues(appendEntries, 3, 0, 1, 2, NOOP(2, 2), NOOP(3, 3));
+                assertThatAppendEntriesHasValues(appendEntries, 3, 0, 2, 1, NOOP(2, 2), NOOP(3, 3));
             } else { // there's still a chance that these guys have the entry at index 1
                 assertThatAppendEntriesHasValues(appendEntries, 3, 0, 2, 2, NOOP(3, 3));
             }
@@ -1323,7 +1322,7 @@ public final class RaftAlgorithmTest {
 
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 2),
+                NOOP(2, 1),
                 NOOP(2, 2),
                 NOOP(3, 3)
         );
@@ -1334,7 +1333,7 @@ public final class RaftAlgorithmTest {
     public void shouldAppendSingleLogEntry() throws StorageException {
         insertIntoLog(
                 SENTINEL(),
-                NOOP(1, 2),
+                NOOP(2, 1),
                 NOOP(2, 2)
         );
         store.setCommitIndex(1);
@@ -1350,7 +1349,7 @@ public final class RaftAlgorithmTest {
 
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 2),
+                NOOP(2, 1),
                 NOOP(2, 2),
                 NOOP(3, 3)
         );
@@ -1359,14 +1358,14 @@ public final class RaftAlgorithmTest {
 
     @Test
     public void shouldAppendMultipleLogEntriesButNotCommit() throws StorageException {
-        insertIntoLog(NOOP(1, 2));
+        insertIntoLog(NOOP(2, 1));
 
         algorithm.becomeFollower(3, S_03);
         assertThatSelfTransitionedToFollower(3, 0, S_03, true);
 
         AppendEntriesReply appendEntriesReply;
 
-        algorithm.onAppendEntries(S_02, 3, 0, 1, 2, Lists.<LogEntry>newArrayList(NOOP(2, 3), NOOP(3, 3)));
+        algorithm.onAppendEntries(S_02, 3, 0, 2, 1, Lists.<LogEntry>newArrayList(NOOP(3, 2), NOOP(3, 3)));
 
         appendEntriesReply = sender.nextAndRemove(AppendEntriesReply.class);
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_02, 3, 1, 2, true);
@@ -1374,10 +1373,10 @@ public final class RaftAlgorithmTest {
 
         // receive even more updates
         // the message must have been sent before they received the response
-        algorithm.onAppendEntries(S_02, 3, 0, 1, 2, Lists.<LogEntry>newArrayList(
-                NOOP(2, 3),
+        algorithm.onAppendEntries(S_02, 3, 0, 2, 1, Lists.<LogEntry>newArrayList(
+                NOOP(3, 2),
                 NOOP(3, 3),
-                NOOP(4, 3)
+                NOOP(3, 4)
         ));
 
         appendEntriesReply = sender.nextAndRemove(AppendEntriesReply.class);
@@ -1386,10 +1385,10 @@ public final class RaftAlgorithmTest {
 
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 2),
-                NOOP(2, 3),
+                NOOP(2, 1),
+                NOOP(3, 2),
                 NOOP(3, 3),
-                NOOP(4, 3)
+                NOOP(3, 4)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -1412,7 +1411,7 @@ public final class RaftAlgorithmTest {
 
         insertIntoLog(
                 NOOP(1, 1),
-                NOOP(2, 1)
+                NOOP(1, 2)
         );
 
         algorithm.becomeFollower(3, S_02);
@@ -1427,7 +1426,7 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1)
+                NOOP(1, 2)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -1450,7 +1449,7 @@ public final class RaftAlgorithmTest {
 
         insertIntoLog(
                 NOOP(1, 1),
-                NOOP(2, 1)
+                NOOP(1, 2)
         );
 
         algorithm.becomeFollower(3, S_02);
@@ -1459,7 +1458,7 @@ public final class RaftAlgorithmTest {
         algorithm.onAppendEntries(S_02, 3, 0, 1, 1, Lists.<LogEntry>newArrayList(
                 NOOP(2, 2),
                 NOOP(3, 3),
-                NOOP(4, 3)
+                NOOP(3, 4)
         ));
 
         AppendEntriesReply appendEntriesReply = sender.nextAndRemove(AppendEntriesReply.class);
@@ -1471,7 +1470,7 @@ public final class RaftAlgorithmTest {
                 NOOP(1, 1),
                 NOOP(2, 2),
                 NOOP(3, 3),
-                NOOP(4, 3)
+                NOOP(3, 4)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -1494,7 +1493,7 @@ public final class RaftAlgorithmTest {
 
         insertIntoLog(
                 NOOP(1, 1),
-                NOOP(2, 1)
+                NOOP(1, 2)
         );
 
         algorithm.becomeFollower(3, S_02);
@@ -1503,13 +1502,13 @@ public final class RaftAlgorithmTest {
         expectedException.expect(IllegalArgumentException.class);
         algorithm.onAppendEntries(S_02, 3, 0, 1, 1, Lists.<LogEntry>newArrayList(
                 NOOP(3, 3),
-                NOOP(4, 3)
+                NOOP(3, 4)
         ));
 
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1)
+                NOOP(1, 2)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -1611,7 +1610,7 @@ public final class RaftAlgorithmTest {
         assertThatSelfTransitionedToFollower(3, 1, S_02, true);
 
         UnitTestCommand command = new UnitTestCommand();
-        algorithm.onAppendEntries(S_02, 3, 1, 1, 1, Lists.<LogEntry>newArrayList(CLIENT(2, 3, command)));
+        algorithm.onAppendEntries(S_02, 3, 1, 1, 1, Lists.<LogEntry>newArrayList(CLIENT(3, 2, command)));
 
         AppendEntriesReply appendEntriesReply = sender.nextAndRemove(AppendEntriesReply.class);
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_02, 3, 1, 1, true);
@@ -1622,7 +1621,7 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                CLIENT(2, 3, command)
+                CLIENT(3, 2, command)
         );
         assertThatTermAndCommitIndexHaveValues(3, 1);
     }
@@ -1673,127 +1672,127 @@ public final class RaftAlgorithmTest {
         // receive a number of messages, after which, our log should look like the leader's
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 9, 2,
+                3, 0, 2, 9,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(10, 3),
-                        NOOP(11, 3),
-                        NOOP(12, 3)
+                        NOOP(3, 10),
+                        NOOP(3, 11),
+                        NOOP(3, 12)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 7, 2,
+                3, 0, 2, 7,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(8, 2),
-                        NOOP(9, 2),
-                        NOOP(10, 3),
-                        NOOP(11, 3),
-                        NOOP(12, 3)
+                        NOOP(2, 8),
+                        NOOP(2, 9),
+                        NOOP(3, 10),
+                        NOOP(3, 11),
+                        NOOP(3, 12)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 8, 2,
+                3, 0, 2, 8,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(9, 2),
-                        NOOP(10, 3),
-                        NOOP(11, 3),
-                        NOOP(12, 3)
+                        NOOP(2, 9),
+                        NOOP(3, 10),
+                        NOOP(3, 11),
+                        NOOP(3, 12)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 5, 1,
+                3, 0, 1, 5,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(6, 2),
-                        NOOP(7, 2)
+                        NOOP(2, 6),
+                        NOOP(2, 7)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 5, 1,
+                3, 0, 1, 5,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(6, 2)
+                        NOOP(2, 6)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 2, 1,
+                3, 0, 1, 2,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(3, 1),
-                        NOOP(4, 1)
-        ));
-        algorithm.onAppendEntries(
-                S_01,
-                3, 0, 1, 1,
-                Lists.<LogEntry>newArrayList(
-                        NOOP(2, 1),
-                        NOOP(3, 1)
+                        NOOP(1, 3),
+                        NOOP(1, 4)
         ));
         algorithm.onAppendEntries(
                 S_01,
                 3, 0, 1, 1,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(2, 1),
-                        NOOP(3, 1)
+                        NOOP(1, 2),
+                        NOOP(1, 3)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 4, 1,
+                3, 0, 1, 1,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(5, 1),
-                        NOOP(6, 2),
-                        NOOP(7, 2)
+                        NOOP(1, 2),
+                        NOOP(1, 3)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 2, 1,
+                3, 0, 1, 4,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(3, 1),
-                        NOOP(4, 1)
+                        NOOP(1, 5),
+                        NOOP(2, 6),
+                        NOOP(2, 7)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 4, 1,
+                3, 0, 1, 2,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(5, 1),
-                        NOOP(6, 2),
-                        NOOP(7, 2),
-                        NOOP(8, 2)
+                        NOOP(1, 3),
+                        NOOP(1, 4)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 9, 2,
+                3, 0, 1, 4,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(10, 3),
-                        NOOP(11, 3),
-                        NOOP(12, 3)
+                        NOOP(1, 5),
+                        NOOP(2, 6),
+                        NOOP(2, 7),
+                        NOOP(2, 8)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 6, 2,
+                3, 0, 2, 9,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(7, 2),
-                        NOOP(8, 2),
-                        NOOP(9, 2),
-                        NOOP(10, 3)
+                        NOOP(3, 10),
+                        NOOP(3, 11),
+                        NOOP(3, 12)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 6, 2,
+                3, 0, 2, 6,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(7, 2),
-                        NOOP(8, 2),
-                        NOOP(9, 2),
-                        NOOP(10, 3)
+                        NOOP(2, 7),
+                        NOOP(2, 8),
+                        NOOP(2, 9),
+                        NOOP(3, 10)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 11, 3,
+                3, 0, 2, 6,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(12, 3)
+                        NOOP(2, 7),
+                        NOOP(2, 8),
+                        NOOP(2, 9),
+                        NOOP(3, 10)
         ));
         algorithm.onAppendEntries(
                 S_01,
-                3, 0, 10, 3,
+                3, 0, 3, 11,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(11, 3),
-                        NOOP(12, 3)
+                        NOOP(3, 12)
+        ));
+        algorithm.onAppendEntries(
+                S_01,
+                3, 0, 3, 10,
+                Lists.<LogEntry>newArrayList(
+                        NOOP(3, 11),
+                        NOOP(3, 12)
         ));
 
         verifyNoMoreInteractions(listener);
@@ -1801,17 +1800,17 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 1),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                NOOP(6, 2),
-                NOOP(7, 2),
-                NOOP(8, 2),
-                NOOP(9, 2),
-                NOOP(10, 3),
-                NOOP(11, 3),
-                NOOP(12, 3)
+                NOOP(1, 2),
+                NOOP(1, 3),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                NOOP(2, 6),
+                NOOP(2, 7),
+                NOOP(2, 8),
+                NOOP(2, 9),
+                NOOP(3, 10),
+                NOOP(3, 11),
+                NOOP(3, 12)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -1827,8 +1826,8 @@ public final class RaftAlgorithmTest {
         // we're sent 3 additional log entries, all of which are committed
         algorithm.onAppendEntries(S_04, 3, 4, 1, 1, Lists.<LogEntry>newArrayList(
                 NOOP(2, 2),
-                NOOP(3, 2),
-                NOOP(4, 3)
+                NOOP(2, 3),
+                NOOP(3, 4)
         ));
 
         // check that we ack this
@@ -1848,8 +1847,8 @@ public final class RaftAlgorithmTest {
                 SENTINEL(),
                 NOOP(1, 1),
                 NOOP(2, 2),
-                NOOP(3, 2),
-                NOOP(4, 3)
+                NOOP(2, 3),
+                NOOP(3, 4)
         );
        assertThatTermAndCommitIndexHaveValues(3, 4);
     }
@@ -1858,11 +1857,11 @@ public final class RaftAlgorithmTest {
     public void shouldCommitNecessaryEntriesIfReceivingAppendEntriesWithAnIncreasedCommitIndex() throws StorageException {
         insertIntoLog(
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 2),
-                NOOP(5, 2),
-                NOOP(6, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(2, 4),
+                NOOP(2, 5),
+                NOOP(3, 6)
         );
         store.setCommitIndex(3);
 
@@ -1872,7 +1871,7 @@ public final class RaftAlgorithmTest {
         // we're given an additional entry
         // but, it's not committed
         // only entries 4 -> 6 are committed
-        algorithm.onAppendEntries(S_04, 3, 6, 6, 3, Lists.<LogEntry>newArrayList(NOOP(7, 3)));
+        algorithm.onAppendEntries(S_04, 3, 6, 3, 6, Lists.<LogEntry>newArrayList(NOOP(3, 7)));
 
         AppendEntriesReply appendEntriesReply = sender.nextAndRemove(AppendEntriesReply.class);
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_04, 3, 6, 1, true);
@@ -1889,12 +1888,12 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 2),
-                NOOP(5, 2),
-                NOOP(6, 3),
-                NOOP(7, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(2, 4),
+                NOOP(2, 5),
+                NOOP(3, 6),
+                NOOP(3, 7)
         );
         assertThatTermAndCommitIndexHaveValues(3, 6);
     }
@@ -1903,7 +1902,7 @@ public final class RaftAlgorithmTest {
     public void shouldCommitNecessaryEntriesIfReceivingHeartbeatWithAnIncreasedCommitIndex() throws StorageException {
         insertIntoLog(
                 NOOP(1, 1),
-                NOOP(2, 3),
+                NOOP(3, 2),
                 NOOP(3, 3)
         );
 
@@ -1928,7 +1927,7 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 3),
+                NOOP(3, 2),
                 NOOP(3, 3)
         );
         assertThatTermAndCommitIndexHaveValues(3, 3);
@@ -1943,7 +1942,7 @@ public final class RaftAlgorithmTest {
         // we start off with the commit index at 1
         insertIntoLog(
                 CLIENT(1, 1, commandAtIndex1),
-                CLIENT(2, 1, commandAtIndex2),
+                CLIENT(1, 2, commandAtIndex2),
                 NOOP(3, 3)
         );
         store.setCommitIndex(1);
@@ -1952,7 +1951,7 @@ public final class RaftAlgorithmTest {
         assertThatSelfTransitionedToFollower(3, 1, S_03, true);
 
         // we're informed of another entry at index 4, and told that everything up to this index is committed
-        algorithm.onAppendEntries(S_03, 3, 4, 3, 3, Lists.<LogEntry>newArrayList(CLIENT(4, 3, commandAtIndex4)));
+        algorithm.onAppendEntries(S_03, 3, 4, 3, 3, Lists.<LogEntry>newArrayList(CLIENT(3, 4, commandAtIndex4)));
 
         AppendEntriesReply appendEntriesReply = sender.nextAndRemove(AppendEntriesReply.class);
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_03, 3, 3, 1, true);
@@ -1967,9 +1966,9 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 CLIENT(1, 1, commandAtIndex1),
-                CLIENT(2, 1, commandAtIndex2),
+                CLIENT(1, 2, commandAtIndex2),
                 NOOP(3, 3),
-                CLIENT(4, 3, commandAtIndex4)
+                CLIENT(3, 4, commandAtIndex4)
         );
         assertThatTermAndCommitIndexHaveValues(3, 4);
     }
@@ -1987,14 +1986,14 @@ public final class RaftAlgorithmTest {
         algorithm.becomeFollower(3, S_04);
         assertThatSelfTransitionedToFollower(3, 1, S_04, true);
 
-        algorithm.onAppendEntries(S_04, 3, 0, 1, 1, Lists.<LogEntry>newArrayList(NOOP(2, 3)));
+        algorithm.onAppendEntries(S_04, 3, 0, 1, 1, Lists.<LogEntry>newArrayList(NOOP(3, 2)));
         AppendEntriesReply appendEntriesReply = sender.nextAndRemove(AppendEntriesReply.class);
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_04, 3, 1, 1, true);
 
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 3)
+                NOOP(3, 2)
         );
         assertThatTermAndCommitIndexHaveValues(3, 1);
     }
@@ -2012,12 +2011,12 @@ public final class RaftAlgorithmTest {
 
         // drain out "I'm leader" messages with the NOOP entry
         Collection<AppendEntries> heartbeats = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(heartbeats, 3, 0, 0, 0, NOOP(1, 3));
+        assertThatAppendEntriesHaveValues(heartbeats, 3, 0, 0, 0, NOOP(3, 1));
         assertThatNoMoreRPCsWereSent();
 
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3)
+                NOOP(3, 1)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
 
@@ -2034,7 +2033,7 @@ public final class RaftAlgorithmTest {
         // hopefully, this means internally we've now moved nextIndex for all the servers
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3)
+                NOOP(3, 1)
         );
         assertThatTermAndCommitIndexHaveValues(3, 1);
 
@@ -2060,13 +2059,13 @@ public final class RaftAlgorithmTest {
         UnitTestCommand command = new UnitTestCommand();
         algorithm.submitCommand(command);
         Collection<AppendEntries> appendEntriesRequests = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 1, 3, CLIENT(2, 3, command));
+        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 3, 1, CLIENT(3, 2, command));
 
         // even before sending anything out our log should have the entry
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command)
+                NOOP(3, 1),
+                CLIENT(3, 2, command)
         );
 
         // move time forward a bit more, and start receiving responses
@@ -2091,17 +2090,17 @@ public final class RaftAlgorithmTest {
         Collection<AppendEntries> heartbeats = getRPCs(4, AppendEntries.class);
         for (AppendEntries heartbeat : heartbeats) {
             if (heartbeat.server.equals(S_01) || heartbeat.server.equals(S_03)) {
-                assertThatAppendEntriesHasValues(heartbeat, 3, 2, 2, 3);
+                assertThatAppendEntriesHasValues(heartbeat, 3, 2, 3, 2);
             } else {
-                assertThatAppendEntriesHasValues(heartbeat, 3, 2, 1, 3, CLIENT(2, 3, command));
+                assertThatAppendEntriesHasValues(heartbeat, 3, 2, 3, 1, CLIENT(3, 2, command));
             }
         }
         assertThatNoMoreRPCsWereSent();
 
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command)
+                NOOP(3, 1),
+                CLIENT(3, 2, command)
         );
         assertThatTermAndCommitIndexHaveValues(3, 2);
     }
@@ -2119,12 +2118,12 @@ public final class RaftAlgorithmTest {
         // after the command is submitted it should be entered immediately into our logs
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command)
+                NOOP(3, 1),
+                CLIENT(3, 2, command)
         );
 
         Collection<AppendEntries> appendEntriesRequests = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 1, 3, CLIENT(2, 3, command));
+        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 3, 1, CLIENT(3, 2, command));
         assertThatNoMoreRPCsWereSent();
 
         timer.fastForward(heartbeatInterval / 2);
@@ -2140,8 +2139,8 @@ public final class RaftAlgorithmTest {
         // and, we shouldn't have touched the log
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command)
+                NOOP(3, 1),
+                CLIENT(3, 2, command)
         );
         assertThatTermAndCommitIndexHaveValues(3, 1);
     }
@@ -2174,8 +2173,8 @@ public final class RaftAlgorithmTest {
     private void setupLeaderForCommitUnitTests() throws StorageException {
         insertIntoLog(
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2)
+                NOOP(1, 2),
+                NOOP(2, 3)
         );
 
         // become the leader
@@ -2188,7 +2187,7 @@ public final class RaftAlgorithmTest {
         long lastIndex = lastLog.getIndex();
 
         // pretend as if we added a bunch of NOOP entries for no
-        // reason. I use NOOPs becase there was a bug previously where
+        // reason. I use NOOPs because there was a bug previously where
         // NOOP entries and CLIENT entries used separate code paths
         // and the NOOP entry path incorrectly initialized a data structure
         // used to calculate whether you'd achieved quorum or not
@@ -2196,24 +2195,24 @@ public final class RaftAlgorithmTest {
         // are NOOPs, CONFIGURATION, or CLIENT - they all
         // use the same commit logic
         // NOTE: these entries will go _after_ the leader's NOOP
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(lastIndex + 1, currentTerm));
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(lastIndex + 2, currentTerm));
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(lastIndex + 3, currentTerm));
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(lastIndex + 4, currentTerm));
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(lastIndex + 5, currentTerm));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(currentTerm, lastIndex + 1));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(currentTerm, lastIndex + 2));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(currentTerm, lastIndex + 3));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(currentTerm, lastIndex + 4));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(currentTerm, lastIndex + 5));
 
         // verify that we're setup correctly
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 3), // NOOP added when server becomes leader
-                NOOP(5, 3),
-                NOOP(6, 3),
-                NOOP(7, 3),
-                NOOP(8, 3),
-                NOOP(9, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(3, 4), // NOOP added when server becomes leader
+                NOOP(3, 5),
+                NOOP(3, 6),
+                NOOP(3, 7),
+                NOOP(3, 8),
+                NOOP(3, 9)
         );
 
         // move to the heartbeat timeout
@@ -2223,13 +2222,13 @@ public final class RaftAlgorithmTest {
         Collection<AppendEntries> heartbeats = getRPCs(4, AppendEntries.class);
         assertThatAppendEntriesHaveValues(
                 heartbeats,
-                3, 0, 3, 2,
-                NOOP(4, 3),
-                NOOP(5, 3),
-                NOOP(6, 3),
-                NOOP(7, 3),
-                NOOP(8, 3),
-                NOOP(9, 3)
+                3, 0, 2, 3,
+                NOOP(3, 4),
+                NOOP(3, 5),
+                NOOP(3, 6),
+                NOOP(3, 7),
+                NOOP(3, 8),
+                NOOP(3, 9)
         );
         assertThatNoMoreRPCsWereSent();
 
@@ -2253,14 +2252,14 @@ public final class RaftAlgorithmTest {
         Collection<AppendEntries> heartbeats = getRPCs(4, AppendEntries.class);
         assertThatAppendEntriesHaveValues(
                 heartbeats,
-                3, 0, 2, 1,
-                NOOP(3, 2),
-                NOOP(4, 3),
-                NOOP(5, 3),
-                NOOP(6, 3),
-                NOOP(7, 3),
-                NOOP(8, 3),
-                NOOP(9, 3)
+                3, 0, 1, 2,
+                NOOP(2, 3),
+                NOOP(3, 4),
+                NOOP(3, 5),
+                NOOP(3, 6),
+                NOOP(3, 7),
+                NOOP(3, 8),
+                NOOP(3, 9)
         );
         assertThatNoMoreRPCsWereSent();
 
@@ -2276,14 +2275,14 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 3),
-                NOOP(5, 3),
-                NOOP(6, 3),
-                NOOP(7, 3),
-                NOOP(8, 3),
-                NOOP(9, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(3, 4),
+                NOOP(3, 5),
+                NOOP(3, 6),
+                NOOP(3, 7),
+                NOOP(3, 8),
+                NOOP(3, 9)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -2319,36 +2318,36 @@ public final class RaftAlgorithmTest {
         Collection<AppendEntries> heartbeats = getRPCs(4, AppendEntries.class);
         for (AppendEntries heartbeat : heartbeats) {
             if (heartbeat.server.equals(S_01)) {
-                assertThatAppendEntriesHasValues(heartbeat, 3, 5, 9, 3);
+                assertThatAppendEntriesHasValues(heartbeat, 3, 5, 3, 9);
             } else if (heartbeat.server.equals(S_02)) {
                 assertThatAppendEntriesHasValues(
                         heartbeat,
-                        3, 5, 5, 3,
-                        NOOP(6, 3),
-                        NOOP(7, 3),
-                        NOOP(8, 3),
-                        NOOP(9, 3)
+                        3, 5, 3, 5,
+                        NOOP(3, 6),
+                        NOOP(3, 7),
+                        NOOP(3, 8),
+                        NOOP(3, 9)
                 );
             } else if (heartbeat.server.equals(S_03)) {
                 assertThatAppendEntriesHasValues(
                         heartbeat,
-                        3, 5, 4, 3,
-                        NOOP(5, 3),
-                        NOOP(6, 3),
-                        NOOP(7, 3),
-                        NOOP(8, 3),
-                        NOOP(9, 3)
+                        3, 5, 3, 4,
+                        NOOP(3, 5),
+                        NOOP(3, 6),
+                        NOOP(3, 7),
+                        NOOP(3, 8),
+                        NOOP(3, 9)
                 );
             } else {
                 assertThatAppendEntriesHasValues(
                         heartbeat,
-                        3, 5, 3, 2,
-                        NOOP(4, 3),
-                        NOOP(5, 3),
-                        NOOP(6, 3),
-                        NOOP(7, 3),
-                        NOOP(8, 3),
-                        NOOP(9, 3)
+                        3, 5, 2, 3,
+                        NOOP(3, 4),
+                        NOOP(3, 5),
+                        NOOP(3, 6),
+                        NOOP(3, 7),
+                        NOOP(3, 8),
+                        NOOP(3, 9)
                 );
             }
         }
@@ -2358,14 +2357,14 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 3),
-                NOOP(5, 3),
-                NOOP(6, 3),
-                NOOP(7, 3),
-                NOOP(8, 3),
-                NOOP(9, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(3, 4),
+                NOOP(3, 5),
+                NOOP(3, 6),
+                NOOP(3, 7),
+                NOOP(3, 8),
+                NOOP(3, 9)
         );
         assertThatTermAndCommitIndexHaveValues(3, 5);
     }
@@ -2385,23 +2384,23 @@ public final class RaftAlgorithmTest {
             if (heartbeat.server.equals(S_03)) {
                 assertThatAppendEntriesHasValues(
                         heartbeat,
-                        3, 0, 4, 3,
-                        NOOP(5, 3),
-                        NOOP(6, 3),
-                        NOOP(7, 3),
-                        NOOP(8, 3),
-                        NOOP(9, 3)
+                        3, 0, 3, 4,
+                        NOOP(3, 5),
+                        NOOP(3, 6),
+                        NOOP(3, 7),
+                        NOOP(3, 8),
+                        NOOP(3, 9)
                 );
             } else {
                 assertThatAppendEntriesHasValues(
                         heartbeat,
-                        3, 0, 3, 2,
-                        NOOP(4, 3),
-                        NOOP(5, 3),
-                        NOOP(6, 3),
-                        NOOP(7, 3),
-                        NOOP(8, 3),
-                        NOOP(9, 3)
+                        3, 0, 2, 3,
+                        NOOP(3, 4),
+                        NOOP(3, 5),
+                        NOOP(3, 6),
+                        NOOP(3, 7),
+                        NOOP(3, 8),
+                        NOOP(3, 9)
                 );
             }
         }
@@ -2411,14 +2410,14 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 3),
-                NOOP(5, 3),
-                NOOP(6, 3),
-                NOOP(7, 3),
-                NOOP(8, 3),
-                NOOP(9, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(3, 4),
+                NOOP(3, 5),
+                NOOP(3, 6),
+                NOOP(3, 7),
+                NOOP(3, 8),
+                NOOP(3, 9)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -2437,13 +2436,13 @@ public final class RaftAlgorithmTest {
         // after the command is submitted it should be entered immediately into our logs
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command)
+                NOOP(3, 1),
+                CLIENT(3, 2, command)
         );
 
         // we submit an AppendEntries to the cluster
         Collection<AppendEntries> appendEntriesRequests = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 1, 3, CLIENT(2, 3, command));
+        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 3, 1, CLIENT(3, 2, command));
         assertThatNoMoreRPCsWereSent();
 
         // move forward time a bit (but not enough to trigger the heartbeat interval)
@@ -2461,17 +2460,17 @@ public final class RaftAlgorithmTest {
         Collection<AppendEntries> heartbeats = getRPCs(4, AppendEntries.class);
         for (AppendEntries heartbeat : heartbeats) {
             if (heartbeat.server.equals(S_01)) {
-                assertThatAppendEntriesHasValues(heartbeat, 3, 1, 2, 3); // got a response, so they're up-to-date
+                assertThatAppendEntriesHasValues(heartbeat, 3, 1, 3, 2); // got a response, so they're up-to-date
             } else {
-                assertThatAppendEntriesHasValues(heartbeat, 3, 1, 1, 3, CLIENT(2, 3, command));  // assume that the others aren't
+                assertThatAppendEntriesHasValues(heartbeat, 3, 1, 3, 1, CLIENT(3, 2, command));  // assume that the others aren't
             }
         }
 
         // nothing should have changed with the log or the commitIndex
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command)
+                NOOP(3, 1),
+                CLIENT(3, 2, command)
         );
         assertThatTermAndCommitIndexHaveValues(3, 1);
     }
@@ -2494,7 +2493,7 @@ public final class RaftAlgorithmTest {
         algorithm.submitCommand(command1);
 
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 1, 3, CLIENT(2, 3, command1));
+        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 3, 1, CLIENT(3, 2, command1));
         assertThatNoMoreRPCsWereSent();
 
         // move forward a bit, but not enough to trigger the heartbeat timeout
@@ -2518,9 +2517,9 @@ public final class RaftAlgorithmTest {
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries heartbeat : appendEntriesRequests) {
             if (heartbeat.server.equals(S_01)) {
-                assertThatAppendEntriesHasValues(heartbeat, 3, 1, 2, 3);
+                assertThatAppendEntriesHasValues(heartbeat, 3, 1, 3, 2);
             } else {
-                assertThatAppendEntriesHasValues(heartbeat, 3, 1, 1, 3, CLIENT(2, 3, command1));
+                assertThatAppendEntriesHasValues(heartbeat, 3, 1, 3, 1, CLIENT(3, 2, command1));
             }
         }
         assertThatNoMoreRPCsWereSent();
@@ -2538,12 +2537,12 @@ public final class RaftAlgorithmTest {
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_01)) {
-                assertThatAppendEntriesHasValues(appendEntries, 3, 1, 2, 3, CLIENT(3, 3, command2));
+                assertThatAppendEntriesHasValues(appendEntries, 3, 1, 3, 2, CLIENT(3, 3, command2));
             } else {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
-                        3, 1, 1, 3,
-                        CLIENT(2, 3, command1),
+                        3, 1, 3, 1,
+                        CLIENT(3, 2, command1),
                         CLIENT(3, 3, command2));
             }
         }
@@ -2565,12 +2564,12 @@ public final class RaftAlgorithmTest {
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_01)) {
-                assertThatAppendEntriesHasValues(appendEntries, 3, 1, 2, 3, CLIENT(3, 3, command2));
+                assertThatAppendEntriesHasValues(appendEntries, 3, 1, 3, 2, CLIENT(3, 3, command2));
             } else {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
-                        3, 1, 1, 3,
-                        CLIENT(2, 3, command1),
+                        3, 1, 3, 1,
+                        CLIENT(3, 2, command1),
                         CLIENT(3, 3, command2));
             }
         }
@@ -2612,14 +2611,14 @@ public final class RaftAlgorithmTest {
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_01) || appendEntries.server.equals(S_03)) {
-                assertThatAppendEntriesHasValues(appendEntries, 3, 2, 2, 3, CLIENT(3, 3, command2)); // missing the last entry
+                assertThatAppendEntriesHasValues(appendEntries, 3, 2, 3, 2, CLIENT(3, 3, command2)); // missing the last entry
             } else if (appendEntries.server.equals(S_04)) {
                 assertThatAppendEntriesHasValues(appendEntries, 3, 2, 3, 3); // has all the entries
             } else {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
-                        3, 2, 1, 3,
-                        CLIENT(2, 3, command1),
+                        3, 2, 3, 1,
+                        CLIENT(3, 2, command1),
                         CLIENT(3, 3, command2));
             }
         }
@@ -2629,8 +2628,8 @@ public final class RaftAlgorithmTest {
 
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command1),
+                NOOP(3, 1),
+                CLIENT(3, 2, command1),
                 CLIENT(3, 3, command2)
         );
         assertThatTermAndCommitIndexHaveValues(3, 2);
@@ -2652,7 +2651,7 @@ public final class RaftAlgorithmTest {
         // submit a command
         algorithm.submitCommand(command1);
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 1, 3, CLIENT(2, 3, command1));
+        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 3, 1, CLIENT(3, 2, command1));
         assertThatNoMoreRPCsWereSent();
 
         // move time forward a bit (but not enough to trigger the heartbeat)
@@ -2673,12 +2672,12 @@ public final class RaftAlgorithmTest {
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_04) || appendEntries.server.equals(S_02)) {
-                assertThatAppendEntriesHasValues(appendEntries, 3, 2, 2, 3, CLIENT(3, 3, command2));
+                assertThatAppendEntriesHasValues(appendEntries, 3, 2, 3, 2, CLIENT(3, 3, command2));
             } else {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
-                        3, 2, 1, 3,
-                        CLIENT(2, 3, command1),
+                        3, 2, 3, 1,
+                        CLIENT(3, 2, command1),
                         CLIENT(3, 3, command2));
             }
         }
@@ -2701,8 +2700,8 @@ public final class RaftAlgorithmTest {
         verifyNoMoreInteractions(listener);
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command1),
+                NOOP(3, 1),
+                CLIENT(3, 2, command1),
                 CLIENT(3, 3, command2)
         );
         assertThatTermAndCommitIndexHaveValues(3, 2);
@@ -2717,7 +2716,7 @@ public final class RaftAlgorithmTest {
         // with an entry for this term to try and force a commit
         becomeLeaderInTerm(3, false);
         Collection<AppendEntries> appendEntriesRequests = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 0, 1, 1, NOOP(2, 3));
+        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 0, 1, 1, NOOP(3, 2));
         assertThatNoMoreRPCsWereSent();
 
         // we haven't notified the listener,
@@ -2727,7 +2726,7 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 3)
+                NOOP(3, 2)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -2744,12 +2743,12 @@ public final class RaftAlgorithmTest {
 
         // drain out "I'm leader" messages with the NOOP entry
         Collection<AppendEntries> heartbeats = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(heartbeats, 3, 0, 0, 0, NOOP(1, 3));
+        assertThatAppendEntriesHaveValues(heartbeats, 3, 0, 0, 0, NOOP(3, 1));
         assertThatNoMoreRPCsWereSent();
 
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3)
+                NOOP(3, 1)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
 
@@ -2761,7 +2760,7 @@ public final class RaftAlgorithmTest {
         // check that we've not done anything funky to the log, but we've bumped our commitIndex
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3)
+                NOOP(3, 1)
         );
         assertThatTermAndCommitIndexHaveValues(3, 1);
 
@@ -2776,8 +2775,8 @@ public final class RaftAlgorithmTest {
     public void shouldDecrementNextIndexWhenReceivingAppendEntriesRejectToFindMatchingPrefix() throws StorageException, RPCException {
         insertIntoLog(
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2)
+                NOOP(1, 2),
+                NOOP(2, 3)
         );
         store.setCommitIndex(1);
 
@@ -2788,16 +2787,16 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(3, 4)
         );
 
         Collection<AppendEntries> appendEntriesRequests;
 
         // check the "I am leader messages"
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 3, 2, NOOP(4, 3));
+        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 2, 3, NOOP(3, 4));
         assertThatNoMoreRPCsWereSent();
 
         // apparently S_03 does not have the same log you do
@@ -2812,11 +2811,11 @@ public final class RaftAlgorithmTest {
             if (appendEntries.server.equals(S_03)) { // this server should get two entries (implying that nextIndex was decremented)
                 assertThatAppendEntriesHasValues(
                         appendEntries,
-                        3, 1, 2, 1,
-                        NOOP(3, 2),
-                        NOOP(4, 3));
+                        3, 1, 1, 2,
+                        NOOP(2, 3),
+                        NOOP(3, 4));
             } else { // everyone gets the heartbeat with the noop entry only
-                assertThatAppendEntriesHasValues(appendEntries, 3, 1, 3, 2, NOOP(4, 3));
+                assertThatAppendEntriesHasValues(appendEntries, 3, 1, 2, 3, NOOP(3, 4));
             }
         }
         assertThatNoMoreRPCsWereSent();
@@ -2827,9 +2826,9 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(3, 4)
         );
         assertThatTermAndCommitIndexHaveValues(3, 1);
     }
@@ -2838,9 +2837,9 @@ public final class RaftAlgorithmTest {
     public void shouldIncrementNextIndexAfterReceivingAppliedAppendEntriesReply() throws StorageException, RPCException {
         insertIntoLog(
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 2)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(2, 4)
         );
         store.setCommitIndex(2);
 
@@ -2849,10 +2848,10 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 2),
-                NOOP(5, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(2, 4),
+                NOOP(3, 5)
         );
         assertThatTermAndCommitIndexHaveValues(3, 2);
 
@@ -2871,10 +2870,10 @@ public final class RaftAlgorithmTest {
         heartbeats = getRPCs(4, AppendEntries.class);
         assertThatAppendEntriesHaveValues(heartbeats,
                 3, 2, 1, 1,
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 2),
-                NOOP(5, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(2, 4),
+                NOOP(3, 5)
         );
         assertThatNoMoreRPCsWereSent();
 
@@ -2892,18 +2891,18 @@ public final class RaftAlgorithmTest {
             if (heartbeat.server.equals(S_02)) { // nextIndex should have moved up
                 assertThatAppendEntriesHasValues(
                         heartbeat,
-                        3, 2, 3, 2,
-                        NOOP(4, 2),
-                        NOOP(5, 3)
+                        3, 2, 2, 3,
+                        NOOP(2, 4),
+                        NOOP(3, 5)
                 );
             } else {
                 assertThatAppendEntriesHasValues(
                         heartbeat,
                         3, 2, 1, 1,
-                        NOOP(2, 1),
-                        NOOP(3, 2),
-                        NOOP(4, 2),
-                        NOOP(5, 3)
+                        NOOP(1, 2),
+                        NOOP(2, 3),
+                        NOOP(2, 4),
+                        NOOP(3, 5)
                 );
             }
         }
@@ -2911,10 +2910,10 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 2),
-                NOOP(5, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(2, 4),
+                NOOP(3, 5)
         );
         assertThatTermAndCommitIndexHaveValues(3, 2);
     }
@@ -2923,8 +2922,8 @@ public final class RaftAlgorithmTest {
     public void shouldNotCommitEntriesUnlessAnEntryFromTheCurrentTermIsCommitted() throws StorageException, RPCException {
         insertIntoLog(
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2)
+                NOOP(1, 2),
+                NOOP(2, 3)
         );
         store.setCommitIndex(1);
 
@@ -2938,14 +2937,14 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(3, 4)
         );
 
         // check the "I am leader messages)
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 3, 2, NOOP(4, 3));
+        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 2, 3, NOOP(3, 4));
         assertThatNoMoreRPCsWereSent();
 
         // apparently no one has the same log you do
@@ -2961,9 +2960,9 @@ public final class RaftAlgorithmTest {
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         assertThatAppendEntriesHaveValues(
                 appendEntriesRequests,
-                3, 1, 2, 1,
-                NOOP(3, 2),
-                NOOP(4, 3));
+                3, 1, 1, 2,
+                NOOP(2, 3),
+                NOOP(3, 4));
         assertThatNoMoreRPCsWereSent();
 
         // OK, this is broken (i.e. the real followers won't do this), but I'm
@@ -2984,9 +2983,9 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(3, 4)
         );
         assertThatTermAndCommitIndexHaveValues(3, 1);
     }
@@ -3003,7 +3002,7 @@ public final class RaftAlgorithmTest {
         algorithm.submitCommand(command);
 
         Collection<AppendEntries> appendEntriesRequests = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 1, 3, CLIENT(2, 3, command));
+        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 3, 1, CLIENT(3, 2, command));
         assertThatNoMoreRPCsWereSent();
 
         // move time forward incrementally, and get two responses
@@ -3025,8 +3024,8 @@ public final class RaftAlgorithmTest {
         verifyNoMoreInteractions(listener);
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command)
+                NOOP(3, 1),
+                CLIENT(3, 2, command)
         );
         assertThatTermAndCommitIndexHaveValues(4, 1);
     }
@@ -3035,8 +3034,8 @@ public final class RaftAlgorithmTest {
     public void shouldIgnoreDelayedAppendEntriesReplyWherePrevLogIndexGreaterThanNextIndexMinusOneAndAppliedIsFalse() throws StorageException, RPCException {
         insertIntoLog(
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2)
+                NOOP(1, 2),
+                NOOP(2, 3)
         );
 
         becomeLeaderInTerm(3, false);
@@ -3044,15 +3043,15 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(3, 4)
         );
 
         Collection<AppendEntries> appendEntriesRequests;
 
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 0, 3, 2, NOOP(4, 3));
+        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 0, 2, 3, NOOP(3, 4));
         assertThatNoMoreRPCsWereSent();
 
         // S_02 says it doesn't have entry at index 3
@@ -3066,11 +3065,11 @@ public final class RaftAlgorithmTest {
         for(AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_02)) { // know for sure they're behind
                 assertThatAppendEntriesHasValues(appendEntries,
-                        3, 0, 2, 1,
-                        NOOP(3, 2),
-                        NOOP(4, 3));
+                        3, 0, 1, 2,
+                        NOOP(2, 3),
+                        NOOP(3, 4));
             } else { // there's a chance the others are not
-                assertThatAppendEntriesHasValues(appendEntries, 3, 0, 3, 2, NOOP(4, 3));
+                assertThatAppendEntriesHasValues(appendEntries, 3, 0, 2, 3, NOOP(3, 4));
             }
         }
         assertThatNoMoreRPCsWereSent();
@@ -3087,11 +3086,11 @@ public final class RaftAlgorithmTest {
             if (appendEntries.server.equals(S_02)) { // know for sure they're behind
                 assertThatAppendEntriesHasValues(appendEntries,
                         3, 0, 1, 1,
-                        NOOP(2, 1),
-                        NOOP(3, 2),
-                        NOOP(4, 3));
+                        NOOP(1, 2),
+                        NOOP(2, 3),
+                        NOOP(3, 4));
             } else {
-                assertThatAppendEntriesHasValues(appendEntries, 3, 0, 3, 2, NOOP(4, 3));
+                assertThatAppendEntriesHasValues(appendEntries, 3, 0, 2, 3, NOOP(3, 4));
             }
         }
         assertThatNoMoreRPCsWereSent();
@@ -3108,11 +3107,11 @@ public final class RaftAlgorithmTest {
             if (appendEntries.server.equals(S_02)) { // we shouldn't have changed nextIndex despite the repeat
                 assertThatAppendEntriesHasValues(appendEntries,
                         3, 0, 1, 1,
-                        NOOP(2, 1),
-                        NOOP(3, 2),
-                        NOOP(4, 3));
+                        NOOP(1, 2),
+                        NOOP(2, 3),
+                        NOOP(3, 4));
             } else {
-                assertThatAppendEntriesHasValues(appendEntries, 3, 0, 3, 2, NOOP(4, 3));
+                assertThatAppendEntriesHasValues(appendEntries, 3, 0, 2, 3, NOOP(3, 4));
             }
         }
         assertThatNoMoreRPCsWereSent();
@@ -3120,9 +3119,9 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 2),
-                NOOP(4, 3)
+                NOOP(1, 2),
+                NOOP(2, 3),
+                NOOP(3, 4)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -3133,9 +3132,9 @@ public final class RaftAlgorithmTest {
                 SENTINEL(),
                 NOOP(1, 1),
                 NOOP(2, 2),
-                NOOP(3, 2),
-                NOOP(4, 2),
-                NOOP(5, 2)
+                NOOP(2, 3),
+                NOOP(2, 4),
+                NOOP(2, 5)
         );
         store.setCommitIndex(1);
 
@@ -3160,12 +3159,12 @@ public final class RaftAlgorithmTest {
             if (appendEntries.server.equals(S_02)) {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
-                        3, 1, 4, 2,
-                        NOOP(5, 2),
-                        NOOP(6, 3)
+                        3, 1, 2, 4,
+                        NOOP(2, 5),
+                        NOOP(3, 6)
                 );
             } else {
-                assertThatAppendEntriesHasValues(appendEntries, 3, 1, 5, 2, NOOP(6, 3));
+                assertThatAppendEntriesHasValues(appendEntries, 3, 1, 2, 5, NOOP(3, 6));
             }
         }
 
@@ -3178,12 +3177,12 @@ public final class RaftAlgorithmTest {
             if (appendEntries.server.equals(S_02)) {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
-                        3, 1, 4, 2,
-                        NOOP(5, 2),
-                        NOOP(6, 3)
+                        3, 1, 2, 4,
+                        NOOP(2, 5),
+                        NOOP(3, 6)
                 );
             } else {
-                assertThatAppendEntriesHasValues(appendEntries, 3, 1, 5, 2, NOOP(6, 3));
+                assertThatAppendEntriesHasValues(appendEntries, 3, 1, 2, 5, NOOP(3, 6));
             }
         }
 
@@ -3191,10 +3190,10 @@ public final class RaftAlgorithmTest {
                 SENTINEL(),
                 NOOP(1, 1),
                 NOOP(2, 2),
-                NOOP(3, 2),
-                NOOP(4, 2),
-                NOOP(5, 2),
-                NOOP(6, 3)
+                NOOP(2, 3),
+                NOOP(2, 4),
+                NOOP(2, 5),
+                NOOP(3, 6)
         );
     }
 
@@ -3212,7 +3211,7 @@ public final class RaftAlgorithmTest {
 
         // now, imagine that somehow the system added 2 NOOP entries
         algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(2, 2));
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(3, 2));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(2, 3));
 
         // move to the first heartbeat
         // we use this to verify that nextIndex is properly set for all the servers in the cluster
@@ -3225,7 +3224,7 @@ public final class RaftAlgorithmTest {
                 appendEntriesRequests,
                 2, 1, 1, 1,
                 NOOP(2, 2),
-                NOOP(3, 2)
+                NOOP(2, 3)
         );
 
         // TEST DESCRIPTION:
@@ -3252,13 +3251,13 @@ public final class RaftAlgorithmTest {
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_04)) { // verify that we updated nextIndex appropriately for S_04
-                assertThatAppendEntriesHasValues(appendEntries, 2, 1, 3, 2);
+                assertThatAppendEntriesHasValues(appendEntries, 2, 1, 2, 3);
             } else {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
                         2, 1, 1, 1,
                         NOOP(2, 2),
-                        NOOP(3, 2)
+                        NOOP(2, 3)
                 );
             }
         }
@@ -3273,13 +3272,13 @@ public final class RaftAlgorithmTest {
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_04)) { // we haven't changed nextIndex for S_04
-                assertThatAppendEntriesHasValues(appendEntries, 2, 1, 3, 2);
+                assertThatAppendEntriesHasValues(appendEntries, 2, 1, 2, 3);
             } else {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
                         2, 1, 1, 1,
                         NOOP(2, 2),
-                        NOOP(3, 2)
+                        NOOP(2, 3)
                 );
             }
         }
@@ -3289,7 +3288,7 @@ public final class RaftAlgorithmTest {
                 SENTINEL(),
                 NOOP(1, 1),
                 NOOP(2, 2),
-                NOOP(3, 2)
+                NOOP(2, 3)
         );
         assertThatTermAndCommitIndexHaveValues(2, 1);
     }
@@ -3331,8 +3330,8 @@ public final class RaftAlgorithmTest {
 
         // now, imagine that somehow the system added 3 NOOP entries
         algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(2, 2));
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(3, 2));
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(4, 2));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(2, 3));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(2, 4));
 
         // move to the first heartbeat
         // we use this to verify that nextIndex is properly set for all the servers in the cluster
@@ -3345,8 +3344,8 @@ public final class RaftAlgorithmTest {
                 appendEntriesRequests,
                 2, 1, 1, 1,
                 NOOP(2, 2),
-                NOOP(3, 2),
-                NOOP(4, 2)
+                NOOP(2, 3),
+                NOOP(2, 4)
         );
 
         // TEST DESCRIPTION:
@@ -3378,16 +3377,16 @@ public final class RaftAlgorithmTest {
             if (appendEntries.server.equals(S_04)) { // verify that we updated nextIndex appropriately for S_04
                 assertThatAppendEntriesHasValues(
                         appendEntries,
-                        2, 1, 3, 2,
-                        NOOP(4, 2)
+                        2, 1, 2, 3,
+                        NOOP(2, 4)
                 );
             } else {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
                         2, 1, 1, 1,
                         NOOP(2, 2),
-                        NOOP(3, 2),
-                        NOOP(4, 2)
+                        NOOP(2, 3),
+                        NOOP(2, 4)
                 );
             }
         }
@@ -3404,16 +3403,16 @@ public final class RaftAlgorithmTest {
             if (appendEntries.server.equals(S_04)) { // we haven't changed nextIndex for S_04
                 assertThatAppendEntriesHasValues(
                         appendEntries,
-                        2, 1, 3, 2,
-                        NOOP(4, 2)
+                        2, 1, 2, 3,
+                        NOOP(2, 4)
                 );
             } else {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
                         2, 1, 1, 1,
                         NOOP(2, 2),
-                        NOOP(3, 2),
-                        NOOP(4, 2)
+                        NOOP(2, 3),
+                        NOOP(2, 4)
                 );
             }
         }
@@ -3429,14 +3428,14 @@ public final class RaftAlgorithmTest {
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_04)) { // S_04 got all the entries
-                assertThatAppendEntriesHasValues(appendEntries, 2, 1, 4, 2);
+                assertThatAppendEntriesHasValues(appendEntries, 2, 1, 2, 4);
             } else {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
                         2, 1, 1, 1,
                         NOOP(2, 2),
-                        NOOP(3, 2),
-                        NOOP(4, 2)
+                        NOOP(2, 3),
+                        NOOP(2, 4)
                 );
             }
         }
@@ -3446,8 +3445,8 @@ public final class RaftAlgorithmTest {
                 SENTINEL(),
                 NOOP(1, 1),
                 NOOP(2, 2),
-                NOOP(3, 2),
-                NOOP(4, 2)
+                NOOP(2, 3),
+                NOOP(2, 4)
         );
         assertThatTermAndCommitIndexHaveValues(2, 1);
     }
@@ -3463,8 +3462,8 @@ public final class RaftAlgorithmTest {
                 S_04,
                 3, 0, 0, 0,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(1, 3),
-                        NOOP(2, 3),
+                        NOOP(3, 1),
+                        NOOP(3, 2),
                         NOOP(3, 3)
                 )
         );
@@ -3472,8 +3471,8 @@ public final class RaftAlgorithmTest {
         // check that we've appended the entries and that we're in a good state
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                NOOP(2, 3),
+                NOOP(3, 1),
+                NOOP(3, 2),
                 NOOP(3, 3)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
@@ -3496,7 +3495,7 @@ public final class RaftAlgorithmTest {
                 S_04,
                 3, 0, 0, 0,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(1, 3)
+                        NOOP(3, 1)
                 )
         );
 
@@ -3509,8 +3508,8 @@ public final class RaftAlgorithmTest {
         // essentially, the following block verifies that we only call the log
         // once for each entry (notice I use eq instead of refEq)
         verify(log, times(1)).put(SENTINEL());
-        verify(log, times(1)).put(eq(NOOP(1, 3)));
-        verify(log, times(1)).put(eq(NOOP(2, 3)));
+        verify(log, times(1)).put(eq(NOOP(3, 1)));
+        verify(log, times(1)).put(eq(NOOP(3, 2)));
         verify(log, times(1)).put(eq(NOOP(3, 3)));
 
         // and, we've bumped our election timeout
@@ -3520,8 +3519,8 @@ public final class RaftAlgorithmTest {
         // and check that we're in a good final state
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                NOOP(2, 3),
+                NOOP(3, 1),
+                NOOP(3, 2),
                 NOOP(3, 3)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
@@ -3538,8 +3537,8 @@ public final class RaftAlgorithmTest {
                 S_04,
                 3, 0, 0, 0,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(1, 3),
-                        NOOP(2, 3),
+                        NOOP(3, 1),
+                        NOOP(3, 2),
                         NOOP(3, 3)
                 )
         );
@@ -3547,8 +3546,8 @@ public final class RaftAlgorithmTest {
         // check that we've appended the entries and that we're in a good state
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                NOOP(2, 3),
+                NOOP(3, 1),
+                NOOP(3, 2),
                 NOOP(3, 3)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
@@ -3571,8 +3570,8 @@ public final class RaftAlgorithmTest {
                 S_04,
                 3, 0, 0, 0,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(1, 3),
-                        NOOP(2, 3),
+                        NOOP(3, 1),
+                        NOOP(3, 2),
                         NOOP(3, 3)
                 )
         );
@@ -3586,8 +3585,8 @@ public final class RaftAlgorithmTest {
         // essentially, the following block verifies that we only call the log
         // once for each entry (notice I use eq instead of refEq)
         verify(log, times(1)).put(SENTINEL());
-        verify(log, times(1)).put(eq(NOOP(1, 3)));
-        verify(log, times(1)).put(eq(NOOP(2, 3)));
+        verify(log, times(1)).put(eq(NOOP(3, 1)));
+        verify(log, times(1)).put(eq(NOOP(3, 2)));
         verify(log, times(1)).put(eq(NOOP(3, 3)));
 
         // and, we've bumped our election timeout
@@ -3597,8 +3596,8 @@ public final class RaftAlgorithmTest {
         // and check that we're in a good final state
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                NOOP(2, 3),
+                NOOP(3, 1),
+                NOOP(3, 2),
                 NOOP(3, 3)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
@@ -3615,8 +3614,8 @@ public final class RaftAlgorithmTest {
                 S_04,
                 3, 2, 0, 0,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(1, 3),
-                        NOOP(2, 3),
+                        NOOP(3, 1),
+                        NOOP(3, 2),
                         NOOP(3, 3)
                 )
         );
@@ -3624,8 +3623,8 @@ public final class RaftAlgorithmTest {
         // check that we've appended the entries and that we're in a good state
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                NOOP(2, 3),
+                NOOP(3, 1),
+                NOOP(3, 2),
                 NOOP(3, 3)
         );
         assertThatTermAndCommitIndexHaveValues(3, 2);
@@ -3648,8 +3647,8 @@ public final class RaftAlgorithmTest {
                 S_04,
                 3, 2, 0, 0,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(1, 3),
-                        NOOP(2, 3),
+                        NOOP(3, 1),
+                        NOOP(3, 2),
                         NOOP(3, 3)
                 )
         );
@@ -3663,8 +3662,8 @@ public final class RaftAlgorithmTest {
         // essentially, the following block verifies that we only call the log
         // once for each entry (notice I use eq instead of refEq)
         verify(log, times(1)).put(SENTINEL());
-        verify(log, times(1)).put(eq(NOOP(1, 3)));
-        verify(log, times(1)).put(eq(NOOP(2, 3)));
+        verify(log, times(1)).put(eq(NOOP(3, 1)));
+        verify(log, times(1)).put(eq(NOOP(3, 2)));
         verify(log, times(1)).put(eq(NOOP(3, 3)));
 
         // and, we've bumped our election timeout
@@ -3674,8 +3673,8 @@ public final class RaftAlgorithmTest {
         // and check that we're in a good final state
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                NOOP(2, 3),
+                NOOP(3, 1),
+                NOOP(3, 2),
                 NOOP(3, 3)
         );
         assertThatTermAndCommitIndexHaveValues(3, 2);
@@ -3692,8 +3691,8 @@ public final class RaftAlgorithmTest {
                 S_04,
                 3, 0, 0, 0,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(1, 3),
-                        NOOP(2, 3),
+                        NOOP(3, 1),
+                        NOOP(3, 2),
                         NOOP(3, 3)
                 )
         );
@@ -3701,8 +3700,8 @@ public final class RaftAlgorithmTest {
         // check that we've appended the entries and that we're in a good state
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                NOOP(2, 3),
+                NOOP(3, 1),
+                NOOP(3, 2),
                 NOOP(3, 3)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
@@ -3726,8 +3725,8 @@ public final class RaftAlgorithmTest {
                 S_04,
                 3, 2, 0, 0,
                 Lists.<LogEntry>newArrayList(
-                        NOOP(1, 3),
-                        NOOP(2, 3),
+                        NOOP(3, 1),
+                        NOOP(3, 2),
                         NOOP(3, 3)
                 )
         );
@@ -3741,8 +3740,8 @@ public final class RaftAlgorithmTest {
         // essentially, the following block verifies that we only call the log
         // once for each entry (notice I use eq instead of refEq)
         verify(log, times(1)).put(SENTINEL());
-        verify(log, times(1)).put(eq(NOOP(1, 3)));
-        verify(log, times(1)).put(eq(NOOP(2, 3)));
+        verify(log, times(1)).put(eq(NOOP(3, 1)));
+        verify(log, times(1)).put(eq(NOOP(3, 2)));
         verify(log, times(1)).put(eq(NOOP(3, 3)));
 
         // and, we've bumped our election timeout
@@ -3752,8 +3751,8 @@ public final class RaftAlgorithmTest {
         // and check that we're in a good final state
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                NOOP(2, 3),
+                NOOP(3, 1),
+                NOOP(3, 2),
                 NOOP(3, 3)
         );
         assertThatTermAndCommitIndexHaveValues(3, 2);
@@ -3815,16 +3814,16 @@ public final class RaftAlgorithmTest {
         // prevent that, so set it to be in term 2, and adjust them later
         insertIntoLog(
                 NOOP(1, 1),
-                NOOP(2, 1),
-                CLIENT(3, 1, command1),
-                CLIENT(4, 1, command2),
-                CLIENT(5, 1, command3),
-                CLIENT(6, 2, command4),
-                CLIENT(7, 2, command5),
-                CLIENT(8, 2, command6),
-                CLIENT(9, 2, command7), // to be overwritten
-                CLIENT(10, 2, command8), // to be overwritten
-                NOOP(11, 2) // to be overwritten
+                NOOP(1, 2),
+                CLIENT(1, 3, command1),
+                CLIENT(1, 4, command2),
+                CLIENT(1, 5, command3),
+                CLIENT(2, 6, command4),
+                CLIENT(2, 7, command5),
+                CLIENT(2, 8, command6),
+                CLIENT(2, 9, command7), // to be overwritten
+                CLIENT(2, 10, command8), // to be overwritten
+                NOOP(2, 11) // to be overwritten
         );
         store.setCommitIndex(4);
 
@@ -3833,9 +3832,9 @@ public final class RaftAlgorithmTest {
         becomeLeaderInTerm(3, false);
 
         // now, adjust the leader's state via invasive probes
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(CLIENT(9, 3, command7));
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(CLIENT(10, 3, command8));
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(11, 3));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(CLIENT(3, 9, command7));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(CLIENT(3, 10, command8));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(3, 11));
 
         algorithm.setServerNextIndexWhileLeaderForUnitTestsOnly(S_01, 1);
         algorithm.setServerNextIndexWhileLeaderForUnitTestsOnly(S_03, 6);
@@ -3847,17 +3846,17 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                CLIENT(3, 1, command1),
-                CLIENT(4, 1, command2), // <----- committed up till here
-                CLIENT(5, 1, command3),
-                CLIENT(6, 2, command4),
-                CLIENT(7, 2, command5),
-                CLIENT(8, 2, command6),
-                CLIENT(9, 3, command7),
-                CLIENT(10, 3, command8),
-                NOOP(11, 3),
-                NOOP(12, 3)
+                NOOP(1, 2),
+                CLIENT(1, 3, command1),
+                CLIENT(1, 4, command2), // <----- committed up till here
+                CLIENT(1, 5, command3),
+                CLIENT(2, 6, command4),
+                CLIENT(2, 7, command5),
+                CLIENT(2, 8, command6),
+                CLIENT(3, 9, command7),
+                CLIENT(3, 10, command8),
+                NOOP(3, 11),
+                NOOP(3, 12)
         );
 
         Collection<AppendEntries> appendEntriesRequests;
@@ -3872,32 +3871,32 @@ public final class RaftAlgorithmTest {
                         appendEntries,
                         3, 4, 0, 0,
                         NOOP(1, 1),
-                        NOOP(2, 1),
-                        CLIENT(3, 1, command1),
-                        CLIENT(4, 1, command2),
-                        CLIENT(5, 1, command3),
-                        CLIENT(6, 2, command4),
-                        CLIENT(7, 2, command5),
-                        CLIENT(8, 2, command6),
-                        CLIENT(9, 3, command7),
-                        CLIENT(10, 3, command8),
-                        NOOP(11, 3),
-                        NOOP(12, 3)
+                        NOOP(1, 2),
+                        CLIENT(1, 3, command1),
+                        CLIENT(1, 4, command2),
+                        CLIENT(1, 5, command3),
+                        CLIENT(2, 6, command4),
+                        CLIENT(2, 7, command5),
+                        CLIENT(2, 8, command6),
+                        CLIENT(3, 9, command7),
+                        CLIENT(3, 10, command8),
+                        NOOP(3, 11),
+                        NOOP(3, 12)
                 );
             } else if (appendEntries.server.equals(S_03)) {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
-                        3, 4, 5, 1,
-                        CLIENT(6, 2, command4),
-                        CLIENT(7, 2, command5),
-                        CLIENT(8, 2, command6),
-                        CLIENT(9, 3, command7),
-                        CLIENT(10, 3, command8),
-                        NOOP(11, 3),
-                        NOOP(12, 3)
+                        3, 4, 1, 5,
+                        CLIENT(2, 6, command4),
+                        CLIENT(2, 7, command5),
+                        CLIENT(2, 8, command6),
+                        CLIENT(3, 9, command7),
+                        CLIENT(3, 10, command8),
+                        NOOP(3, 11),
+                        NOOP(3, 12)
                 );
             } else {
-                assertThatAppendEntriesHasValues(appendEntries, 3, 4, 11, 3, NOOP(12, 3));
+                assertThatAppendEntriesHasValues(appendEntries, 3, 4, 3, 11, NOOP(3, 12));
             }
         }
         assertThatNoMoreRPCsWereSent();
@@ -3926,17 +3925,17 @@ public final class RaftAlgorithmTest {
         assertThatLogContains(
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                CLIENT(3, 1, command1),
-                CLIENT(4, 1, command2),
-                CLIENT(5, 1, command3),
-                CLIENT(6, 2, command4),
-                CLIENT(7, 2, command5),
-                CLIENT(8, 2, command6),
-                CLIENT(9, 3, command7),
-                CLIENT(10, 3, command8),
-                NOOP(11, 3),
-                NOOP(12, 3)
+                NOOP(1, 2),
+                CLIENT(1, 3, command1),
+                CLIENT(1, 4, command2),
+                CLIENT(1, 5, command3),
+                CLIENT(2, 6, command4),
+                CLIENT(2, 7, command5),
+                CLIENT(2, 8, command6),
+                CLIENT(3, 9, command7),
+                CLIENT(3, 10, command8),
+                NOOP(3, 11),
+                NOOP(3, 12)
         );
     }
 
@@ -3948,7 +3947,7 @@ public final class RaftAlgorithmTest {
         algorithm.submitCommand(command);
 
         Collection<AppendEntries> appendEntriesRequests = getRPCs(4, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 1, 3, CLIENT(2, 3, command));
+        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 3, 1, CLIENT(3, 2, command));
         assertThatNoMoreRPCsWereSent();
 
         long heartbeatTimeout = getHeartbeatTimeoutTick();
@@ -3972,8 +3971,8 @@ public final class RaftAlgorithmTest {
         // check final state
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command)
+                NOOP(3, 1),
+                CLIENT(3, 2, command)
         );
         assertThatTermAndCommitIndexHaveValues(3, 2);
     }
@@ -4013,7 +4012,7 @@ public final class RaftAlgorithmTest {
                 3, 0, 1, 1,
                 NOOP(2, 2),
                 NOOP(3, 3),
-                CLIENT(4, 3, command)
+                CLIENT(3, 4, command)
         );
         assertThatNoMoreRPCsWereSent();
 
@@ -4033,14 +4032,14 @@ public final class RaftAlgorithmTest {
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         for (AppendEntries appendEntries : appendEntriesRequests) {
             if (appendEntries.server.equals(S_03)) {
-                assertThatAppendEntriesHasValues(appendEntries, 3, 0, 4, 3);
+                assertThatAppendEntriesHasValues(appendEntries, 3, 0, 3, 4);
             } else {
                 assertThatAppendEntriesHasValues(
                         appendEntries,
                         3, 0, 1, 1,
                         NOOP(2, 2),
                         NOOP(3, 3),
-                        CLIENT(4, 3, command)
+                        CLIENT(3, 4, command)
                 );
             }
         }
@@ -4052,7 +4051,7 @@ public final class RaftAlgorithmTest {
                 NOOP(1, 1),
                 NOOP(2, 2),
                 NOOP(3, 3),
-                CLIENT(4, 3, command)
+                CLIENT(3, 4, command)
         );
         assertThatTermAndCommitIndexHaveValues(3, 0);
     }
@@ -4084,8 +4083,8 @@ public final class RaftAlgorithmTest {
         // check the log and commitIndex
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command)
+                NOOP(3, 1),
+                CLIENT(3, 2, command)
         );
         assertThatTermAndCommitIndexHaveValues(3, 1);
 
@@ -4105,8 +4104,8 @@ public final class RaftAlgorithmTest {
         // check final state
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command)
+                NOOP(3, 1),
+                CLIENT(3, 2, command)
         );
         assertThatTermAndCommitIndexHaveValues(3, 2);
     }
@@ -4134,8 +4133,8 @@ public final class RaftAlgorithmTest {
         commandFuture2 = algorithm.submitCommand(command2);
         assertThat(commandFuture2.isDone(), equalTo(false));
 
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(4, 3));
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(5, 3));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(3, 4));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(3, 5));
 
         commandFuture3 = algorithm.submitCommand(command3);
         assertThat(commandFuture3.isDone(), equalTo(false));
@@ -4143,7 +4142,7 @@ public final class RaftAlgorithmTest {
         commandFuture4 = algorithm.submitCommand(command4);
         assertThat(commandFuture4.isDone(), equalTo(false));
 
-        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(8, 3));
+        algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(NOOP(3, 8));
 
         commandFuture5 = algorithm.submitCommand(command5);
         assertThat(commandFuture5.isDone(), equalTo(false));
@@ -4151,15 +4150,15 @@ public final class RaftAlgorithmTest {
         // check the log and commitIndex
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command1),
+                NOOP(3, 1),
+                CLIENT(3, 2, command1),
                 CLIENT(3, 3, command2),
-                NOOP(4, 3),
-                NOOP(5, 3),
-                CLIENT(6, 3, command3),
-                CLIENT(7, 3, command4),
-                NOOP(8, 3),
-                CLIENT(9, 3, command5)
+                NOOP(3, 4),
+                NOOP(3, 5),
+                CLIENT(3, 6, command3),
+                CLIENT(3, 7, command4),
+                NOOP(3, 8),
+                CLIENT(3, 9, command5)
         );
         assertThatTermAndCommitIndexHaveValues(3, 1);
 
@@ -4193,15 +4192,15 @@ public final class RaftAlgorithmTest {
         // check final state
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command1),
+                NOOP(3, 1),
+                CLIENT(3, 2, command1),
                 CLIENT(3, 3, command2),
-                NOOP(4, 3),
-                NOOP(5, 3),
-                CLIENT(6, 3, command3),
-                CLIENT(7, 3, command4),
-                NOOP(8, 3),
-                CLIENT(9, 3, command5)
+                NOOP(3, 4),
+                NOOP(3, 5),
+                CLIENT(3, 6, command3),
+                CLIENT(3, 7, command4),
+                NOOP(3, 8),
+                CLIENT(3, 9, command5)
         );
         assertThatTermAndCommitIndexHaveValues(3, 9);
     }
@@ -4221,8 +4220,7 @@ public final class RaftAlgorithmTest {
 
         algorithm.addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(
                 NOOP(
-                        log.getLast().getIndex() + 1,
-                        store.getCurrentTerm()
+                        store.getCurrentTerm(), log.getLast().getIndex() + 1
                 )
         );
 
@@ -4232,11 +4230,11 @@ public final class RaftAlgorithmTest {
 
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command1),
+                NOOP(3, 1),
+                CLIENT(3, 2, command1),
                 CLIENT(3, 3, command2),
-                NOOP(4, 3),
-                CLIENT(5, 3, command3)
+                NOOP(3, 4),
+                CLIENT(3, 5, command3)
         );
         assertThatTermAndCommitIndexHaveValues(3, 1);
 
@@ -4248,18 +4246,18 @@ public final class RaftAlgorithmTest {
         Collection<AppendEntries> heartbeats = getRPCs(4, AppendEntries.class);
         assertThatAppendEntriesHaveValues(
                 heartbeats,
-                3, 1, 1, 3,
-                CLIENT(2, 3, command1),
+                3, 1, 3, 1,
+                CLIENT(3, 2, command1),
                 CLIENT(3, 3, command2),
-                NOOP(4, 3),
-                CLIENT(5, 3, command3)
+                NOOP(3, 4),
+                CLIENT(3, 5, command3)
         );
         assertThatNoMoreRPCsWereSent();
 
         AppendEntriesReply appendEntriesReply;
 
         // now, get someone claiming to be the leader
-        algorithm.onAppendEntries(S_01, 4, 1, 5, 3, Lists.<LogEntry>newArrayList(NOOP(6, 4)));
+        algorithm.onAppendEntries(S_01, 4, 1, 3, 5, Lists.<LogEntry>newArrayList(NOOP(4, 6)));
 
         // verify that we change to follower
         assertThatSelfTransitionedToFollower(4, 1, S_01, true);
@@ -4291,17 +4289,17 @@ public final class RaftAlgorithmTest {
         assertThatAppendEntriesReplyHasValues(appendEntriesReply, S_01, 4, 5, 1, true);
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command1),
+                NOOP(3, 1),
+                CLIENT(3, 2, command1),
                 CLIENT(3, 3, command2),
-                NOOP(4, 3),
-                CLIENT(5, 3, command3),
-                NOOP(6, 4)
+                NOOP(3, 4),
+                CLIENT(3, 5, command3),
+                NOOP(4, 6)
         );
         assertThatTermAndCommitIndexHaveValues(4, 1);
 
         // get notified that all the entries that were sent out were committed
-        algorithm.onAppendEntries(S_01, 4, 6, 6, 4, null);
+        algorithm.onAppendEntries(S_01, 4, 6, 4, 6, null);
 
         // check that the listener was notified (this is independent of the fact that the command futures were all tripped to false!)
         InOrder notificationOrder = inOrder(listener);
@@ -4315,12 +4313,12 @@ public final class RaftAlgorithmTest {
         // verify that the final state looks good
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command1),
+                NOOP(3, 1),
+                CLIENT(3, 2, command1),
                 CLIENT(3, 3, command2),
-                NOOP(4, 3),
-                CLIENT(5, 3, command3),
-                NOOP(6, 4)
+                NOOP(3, 4),
+                CLIENT(3, 5, command3),
+                NOOP(4, 6)
         );
         assertThatTermAndCommitIndexHaveValues(4, 6);
     }
@@ -4357,11 +4355,11 @@ public final class RaftAlgorithmTest {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 NOOP(1, 1),
-                CLIENT(2, 1, new UnitTestCommand()),
-                CLIENT(3, 1, new UnitTestCommand()), // <-- committed until here
-                CLIENT(4, 1, new UnitTestCommand()),
-                CLIENT(5, 1, new UnitTestCommand()),
-                CLIENT(6, 1, new UnitTestCommand())
+                CLIENT(1, 2, new UnitTestCommand()),
+                CLIENT(1, 3, new UnitTestCommand()), // <-- committed until here
+                CLIENT(1, 4, new UnitTestCommand()),
+                CLIENT(1, 5, new UnitTestCommand()),
+                CLIENT(1, 6, new UnitTestCommand())
         };
         final long currentTerm = 1;
         final long commitIndex = 3;
@@ -4397,11 +4395,11 @@ public final class RaftAlgorithmTest {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 NOOP(1, 1),
-                CLIENT(2, 1, new UnitTestCommand()),
-                CLIENT(3, 1, new UnitTestCommand()),
-                CLIENT(4, 1, new UnitTestCommand()),
-                CLIENT(5, 1, new UnitTestCommand()),
-                CLIENT(6, 1, new UnitTestCommand())  // <-- committed until here (i.e. _everything_ is committed)
+                CLIENT(1, 2, new UnitTestCommand()),
+                CLIENT(1, 3, new UnitTestCommand()),
+                CLIENT(1, 4, new UnitTestCommand()),
+                CLIENT(1, 5, new UnitTestCommand()),
+                CLIENT(1, 6, new UnitTestCommand())  // <-- committed until here (i.e. _everything_ is committed)
         };
         final long currentTerm = 2;
         final long commitIndex = entries.length - 1;
@@ -4442,7 +4440,7 @@ public final class RaftAlgorithmTest {
     public void shouldThrowIllegalArgumentExceptionIfCallerSpecifiesIndexGreaterThanLastAppliedIndexInSnapshotInCallToGetNextCommitted() throws Exception {
         // we have a snapshot that contains data to index 6 (inclusive)
         long lastAppliedIndex = 6;
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(lastAppliedIndex, 2);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(2, lastAppliedIndex);
 
         // our log is empty
         clearLog(); // clear out the log completely - we don't even want the sentinel
@@ -4488,21 +4486,21 @@ public final class RaftAlgorithmTest {
     @Test
     public void shouldThrowIllegalArgumentExceptionIfCallerSpecifiesIndexGreaterThanLastLogIndexInCallToGetNextCommittedAndBothLogAndSnapshotExist() throws Exception {
         // we have a snapshot that contains data to index 9 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(9L, 2);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(2, 9L);
 
         // we have a log that contains entries from index 7 onwards
-        LogEntry unappliedEntry0 = CLIENT(7, 2, new UnitTestCommand());
-        LogEntry unAppliedEntry1 = NOOP(8, 2);
-        LogEntry unappliedEntry2 = NOOP(9, 3);
-        LogEntry unappliedEntry3 = CLIENT(10, 3, new UnitTestCommand());
-        LogEntry unappliedEntry4 = CLIENT(11, 3, new UnitTestCommand());
+        LogEntry unappliedEntry0 = CLIENT(2, 7, new UnitTestCommand());
+        LogEntry unAppliedEntry1 = NOOP(2, 8);
+        LogEntry unappliedEntry2 = NOOP(3, 9);
+        LogEntry unappliedEntry3 = CLIENT(3, 10, new UnitTestCommand());
+        LogEntry unappliedEntry4 = CLIENT(3, 11, new UnitTestCommand());
         final LogEntry[] entries = new LogEntry[] {
                 unappliedEntry0,
                 unAppliedEntry1,
                 unappliedEntry2,
                 unappliedEntry3,
                 unappliedEntry4, // <------ we've committed up to here
-                CLIENT(12, 3, new UnitTestCommand())
+                CLIENT(3, 12, new UnitTestCommand())
         };
         clearLog(); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(entries);
@@ -4567,9 +4565,9 @@ public final class RaftAlgorithmTest {
     public void shouldReturnCorrectSequenceOfCommittedInstancesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromAsZero() throws Exception {
         LogEntry unappliedEntries[] = {
                 NOOP(1, 1),
-                CLIENT(2, 1, new UnitTestCommand()),
-                CLIENT(3, 1, new UnitTestCommand()),
-                CLIENT(4, 1, new UnitTestCommand()),
+                CLIENT(1, 2, new UnitTestCommand()),
+                CLIENT(1, 3, new UnitTestCommand()),
+                CLIENT(1, 4, new UnitTestCommand()),
         };
 
         // starting state before the calls to "getNextCommitted"
@@ -4580,7 +4578,7 @@ public final class RaftAlgorithmTest {
                 unappliedEntries[1],
                 unappliedEntries[2],
                 unappliedEntries[3],                 // <--- only committed up to here
-                CLIENT(5, 1, new UnitTestCommand()), // <--- uncommitted from this point on
+                CLIENT(1, 5, new UnitTestCommand()), // <--- uncommitted from this point on
         };
         insertIntoLog(entries);
         store.setCommitIndex(commitIndex);
@@ -4615,13 +4613,13 @@ public final class RaftAlgorithmTest {
     @Test
     public void shouldReturnCorrectSequenceOfCommittedInstancesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromInMiddleOfLog() throws Exception {
         LogEntry unappliedEntries[] = {
-                CLIENT(4, 1, new UnitTestCommand()),
-                NOOP(5, 2),
-                CLIENT(6, 2, new UnitTestCommand()),
-                NOOP(7, 3),
-                CLIENT(8, 3, new UnitTestCommand()),
-                CLIENT(9, 3, new UnitTestCommand()),
-                CLIENT(10, 3, new UnitTestCommand()),
+                CLIENT(1, 4, new UnitTestCommand()),
+                NOOP(2, 5),
+                CLIENT(2, 6, new UnitTestCommand()),
+                NOOP(3, 7),
+                CLIENT(3, 8, new UnitTestCommand()),
+                CLIENT(3, 9, new UnitTestCommand()),
+                CLIENT(3, 10, new UnitTestCommand()),
         };
 
         // starting state before the calls to "getNextCommitted"
@@ -4629,8 +4627,8 @@ public final class RaftAlgorithmTest {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                CLIENT(3, 1, new UnitTestCommand()),  // <--- applied this command (but nothing after!)
+                NOOP(1, 2),
+                CLIENT(1, 3, new UnitTestCommand()),  // <--- applied this command (but nothing after!)
                 unappliedEntries[0],
                 unappliedEntries[1],
                 unappliedEntries[2],
@@ -4638,10 +4636,10 @@ public final class RaftAlgorithmTest {
                 unappliedEntries[4],
                 unappliedEntries[5],
                 unappliedEntries[6],                  // <--- only committed up to here!
-                CLIENT(11, 3, new UnitTestCommand()), // <--- uncommitted from this point on
-                CLIENT(12, 3, new UnitTestCommand()),
-                CLIENT(13, 3, new UnitTestCommand()),
-                CLIENT(14, 3, new UnitTestCommand())
+                CLIENT(3, 11, new UnitTestCommand()), // <--- uncommitted from this point on
+                CLIENT(3, 12, new UnitTestCommand()),
+                CLIENT(3, 13, new UnitTestCommand()),
+                CLIENT(3, 14, new UnitTestCommand())
         };
         insertIntoLog(entries);
         store.setCommitIndex(commitIndex);
@@ -4678,7 +4676,7 @@ public final class RaftAlgorithmTest {
         // we have a snapshot that contains data to index 6 (inclusive)
         int lastAppliedTerm = 2;
         long lastAppliedIndex = 6;
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(lastAppliedIndex, lastAppliedTerm);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(lastAppliedTerm, lastAppliedIndex);
 
         // our log is empty
         clearLog(); // clear out the log completely - we don't even want the sentinel
@@ -4728,7 +4726,7 @@ public final class RaftAlgorithmTest {
         // we have a snapshot that contains data to index 6 (inclusive)
         long lastAppliedTerm = 2;
         long lastAppliedIndex = 6;
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(lastAppliedIndex, lastAppliedTerm);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(lastAppliedTerm, lastAppliedIndex);
 
         // our log is empty
         clearLog(); // clear out the log completely - we don't even want the sentinel
@@ -4778,18 +4776,18 @@ public final class RaftAlgorithmTest {
     @Test
     public void shouldReturnSnapshotFollowedByLogEntriesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromAsZero() throws Exception {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot((long) 6, 2);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(2, (long) 6);
 
         // we have a log that contains entries from index 7 onwards
-        LogEntry unappliedEntry0 = CLIENT(7, 2, new UnitTestCommand());
-        LogEntry unappliedEntry1 = NOOP(8, 2);
+        LogEntry unappliedEntry0 = CLIENT(2, 7, new UnitTestCommand());
+        LogEntry unappliedEntry1 = NOOP(2, 8);
         final LogEntry[] entries = new LogEntry[] {
                 unappliedEntry0,
                 unappliedEntry1, // <------ we've committed up to here
-                NOOP(9, 3),
-                CLIENT(10, 3, new UnitTestCommand()),
-                CLIENT(11, 3, new UnitTestCommand()),
-                CLIENT(12, 3, new UnitTestCommand())
+                NOOP(3, 9),
+                CLIENT(3, 10, new UnitTestCommand()),
+                CLIENT(3, 11, new UnitTestCommand()),
+                CLIENT(3, 12, new UnitTestCommand())
         };
         clearLog(); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(entries);
@@ -4850,18 +4848,18 @@ public final class RaftAlgorithmTest {
     @Test
     public void shouldReturnLogEntriesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromNonZeroAndAfterTheLastAppliedIndexInTheSnapshot() throws Exception {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 2);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(2, 6L);
 
         // we have a log that contains entries from index 7 onwards
-        LogEntry unappliedEntry0 = NOOP(8, 2);
-        LogEntry unappliedEntry1 = CLIENT(9, 2, new UnitTestCommand());
+        LogEntry unappliedEntry0 = NOOP(2, 8);
+        LogEntry unappliedEntry1 = CLIENT(2, 9, new UnitTestCommand());
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(7, 2, new UnitTestCommand()),
+                CLIENT(2, 7, new UnitTestCommand()),
                 unappliedEntry0,
                 unappliedEntry1, // <------ we've committed up to here
-                CLIENT(10, 3, new UnitTestCommand()),
-                CLIENT(11, 3, new UnitTestCommand()),
-                CLIENT(12, 3, new UnitTestCommand())
+                CLIENT(3, 10, new UnitTestCommand()),
+                CLIENT(3, 11, new UnitTestCommand()),
+                CLIENT(3, 12, new UnitTestCommand())
         };
         clearLog(); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(entries);
@@ -4917,15 +4915,15 @@ public final class RaftAlgorithmTest {
     @Test
     public void shouldReturnSnapshotFollowedByLogEntriesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromAsZeroAndOverlapBetweenLogAndSnapshot() throws Exception {
         // we have a snapshot that contains data to index 9 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(9L, 2);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(2, 9L);
 
         // we have a log that contains entries from index 7 onwards
         LogEntry unappliedEntries[] = {
-                CLIENT(7, 2, new UnitTestCommand()),
-                NOOP(8, 2),
-                NOOP(9, 3),
-                CLIENT(10, 3, new UnitTestCommand()),
-                CLIENT(11, 3, new UnitTestCommand()),
+                CLIENT(2, 7, new UnitTestCommand()),
+                NOOP(2, 8),
+                NOOP(3, 9),
+                CLIENT(3, 10, new UnitTestCommand()),
+                CLIENT(3, 11, new UnitTestCommand()),
         };
         final LogEntry[] entries = new LogEntry[] {
                 unappliedEntries[0],
@@ -4933,7 +4931,7 @@ public final class RaftAlgorithmTest {
                 unappliedEntries[2],
                 unappliedEntries[3],
                 unappliedEntries[4], // <------ we've committed up to here
-                CLIENT(12, 3, new UnitTestCommand())
+                CLIENT(3, 12, new UnitTestCommand())
         };
         clearLog(); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(entries);
@@ -4999,15 +4997,15 @@ public final class RaftAlgorithmTest {
     @Test
     public void shouldReturnSnapshotFollowedByLogEntriesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromNonZeroAndOverlapBetweenLogAndSnapshot() throws Exception {
         // we have a snapshot that contains data to index 9 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(9L, 2);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(2, 9L);
 
         // we have a log that contains entries from index 7 onwards
         LogEntry unappliedEntries[] = {
-                CLIENT(7, 2, new UnitTestCommand()),
-                NOOP(8, 2),
-                NOOP(9, 3),
-                CLIENT(10, 3, new UnitTestCommand()),
-                CLIENT(11, 3, new UnitTestCommand()),
+                CLIENT(2, 7, new UnitTestCommand()),
+                NOOP(2, 8),
+                NOOP(3, 9),
+                CLIENT(3, 10, new UnitTestCommand()),
+                CLIENT(3, 11, new UnitTestCommand()),
         };
         final LogEntry[] entries = new LogEntry[] {
                 unappliedEntries[0],
@@ -5015,7 +5013,7 @@ public final class RaftAlgorithmTest {
                 unappliedEntries[2],
                 unappliedEntries[3],
                 unappliedEntries[4], // <------ we've committed up to here
-                CLIENT(12, 3, new UnitTestCommand())
+                CLIENT(3, 12, new UnitTestCommand())
         };
         clearLog(); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(entries);
@@ -5080,17 +5078,17 @@ public final class RaftAlgorithmTest {
     @Test
     public void shouldReturnLogEntryInResponseToRepeatedGetNextCommittedCallsWithNonZeroInitialIndexToSearchFromAndOverlapBetweenLogAndSnapshot() throws Exception {
         // we have a snapshot that contains data to index 7 (inclusive)
-        SnapshotsStore.ExtendedSnapshot snapshot = new UnitTestSnapshot(7L, 2);
+        SnapshotsStore.ExtendedSnapshot snapshot = new UnitTestSnapshot(2, 7L);
 
         // the log only contains entries from index 7 (inclusive) onwards
-        LogEntry unappliedEntry0 = NOOP(7, 2);
+        LogEntry unappliedEntry0 = NOOP(2, 7);
         final LogEntry[] entries = new LogEntry[] {
                 unappliedEntry0, // <------ we've committed up to here
-                NOOP(8, 2),
-                NOOP(9, 3),
-                CLIENT(10, 3, new UnitTestCommand()),
-                CLIENT(11, 3, new UnitTestCommand()),
-                CLIENT(12, 3, new UnitTestCommand())
+                NOOP(2, 8),
+                NOOP(3, 9),
+                CLIENT(3, 10, new UnitTestCommand()),
+                CLIENT(3, 11, new UnitTestCommand()),
+                CLIENT(3, 12, new UnitTestCommand())
         };
         clearLog(); // want the log to be completely clear
         insertIntoLog(entries);
@@ -5155,17 +5153,17 @@ public final class RaftAlgorithmTest {
     public void shouldReturnLogEntriesInResponseToRepeatedGetNextCommittedCallsWithInitialIndexToSearchFromNonZeroAndOverlapBetweenLogAndSnapshot() throws Exception {
         // we have a snapshot that contains data to index 9 (inclusive)
         long lastAppliedIndex = 9;
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(lastAppliedIndex, 2);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(2, lastAppliedIndex);
 
         // we have a log that contains entries from index 7 onwards
-        LogEntry unappliedEntry0 = CLIENT(11, 3, new UnitTestCommand());
+        LogEntry unappliedEntry0 = CLIENT(3, 11, new UnitTestCommand());
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(7, 2, new UnitTestCommand()),
-                NOOP(8, 2),
-                NOOP(9, 3),
-                CLIENT(10, 3, new UnitTestCommand()),
+                CLIENT(2, 7, new UnitTestCommand()),
+                NOOP(2, 8),
+                NOOP(3, 9),
+                CLIENT(3, 10, new UnitTestCommand()),
                 unappliedEntry0, // <------ we've committed up to here
-                CLIENT(12, 3, new UnitTestCommand())
+                CLIENT(3, 12, new UnitTestCommand())
         };
         clearLog(); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(entries);
@@ -5331,13 +5329,13 @@ public final class RaftAlgorithmTest {
 
         // check that the remainder of the heartbeats were sent successfully
         Collection<AppendEntries> appendEntriesRequests = getRPCs(3, AppendEntries.class);
-        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 1, 3);
+        assertThatAppendEntriesHaveValues(appendEntriesRequests, 3, 1, 3, 1);
         assertThat(getRPCDestinations(appendEntriesRequests), containsInAnyOrder(S_01, S_03, S_04));
 
         // final state
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3)
+                NOOP(3, 1)
         );
         assertThatTermAndCommitIndexHaveValues(3, 1);
     }
@@ -5385,16 +5383,16 @@ public final class RaftAlgorithmTest {
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         assertThatAppendEntriesHaveValues(
                 appendEntriesRequests,
-                3, 1, 1, 3,
-                CLIENT(2, 3, command0)
+                3, 1, 3, 1,
+                CLIENT(3, 2, command0)
         );
 
         // AppendEntries for second command
         appendEntriesRequests = getRPCs(4, AppendEntries.class);
         assertThatAppendEntriesHaveValues(
                 appendEntriesRequests,
-                3, 1, 1, 3,
-                CLIENT(2, 3, command0),
+                3, 1, 3, 1,
+                CLIENT(3, 2, command0),
                 CLIENT(3, 3, command1)
         );
 
@@ -5417,8 +5415,8 @@ public final class RaftAlgorithmTest {
         // check that we've updated our state before calling the listener
         assertThatLogContains(
                 SENTINEL(),
-                NOOP(1, 3),
-                CLIENT(2, 3, command0),
+                NOOP(3, 1),
+                CLIENT(3, 2, command0),
                 CLIENT(3, 3, command1)
         );
         assertThatTermAndCommitIndexHaveValues(3, 3);

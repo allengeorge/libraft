@@ -38,12 +38,12 @@ final class UnitTestSnapshot implements SnapshotsStore.ExtendedSnapshot {
 
     public final String TEST_DATA = "TEST_DATA";
 
-    private long index;
     private long term;
+    private long index;
 
-    UnitTestSnapshot(long index, long term) {
-        this.index = index;
+    UnitTestSnapshot(long term, long index) {
         this.term = term;
+        this.index = index;
     }
 
     @Override
@@ -52,13 +52,13 @@ final class UnitTestSnapshot implements SnapshotsStore.ExtendedSnapshot {
     }
 
     @Override
-    public long getIndex() {
-        return index;
+    public long getTerm() {
+        return term;
     }
 
     @Override
-    public long getTerm() {
-        return term;
+    public long getIndex() {
+        return index;
     }
 
     @Override

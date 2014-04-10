@@ -105,8 +105,8 @@ public abstract class LogEntry {
             return Objects
                     .toStringHelper(this)
                     .add("type", "SENTINEL")
-                    .add("index", getIndex())
                     .add("term", getTerm())
+                    .add("index", getIndex())
                     .toString();
         }
     };
@@ -117,23 +117,25 @@ public abstract class LogEntry {
     //
 
     private final Type type;
-    private final long index;
     private final long term;
+    private final long index;
 
     // keeping this constructor private restricts
     // the number of allowed LogEntry types to those defined in this
     // compilation unit
     // i.e. using 'protected' instead would allow anyone to define additional
     // LogEntry types, which I don't support
-    private LogEntry(Type type, long index, long term) {
-        checkArgument(index >= 0, "index must be positive:%s", index);
+    private LogEntry(Type type, long term, long index) {
         checkArgument(term >= 0, "term must be positive:%s", term);
-        if (index == 0 && term == 0) {
+        checkArgument(index >= 0, "index must be positive:%s", index);
+
+        if (term == 0 && index == 0) {
             checkArgument(type == Type.SENTINEL);
         }
+
         this.type = type;
-        this.index = index;
         this.term = term;
+        this.index = index;
     }
 
     /**
@@ -146,15 +148,6 @@ public abstract class LogEntry {
     }
 
     /**
-     * Get the log entry's position in the 0-indexed Raft log.
-     *
-     * @return index >= 0 of this log entry's position in the Raft log
-     */
-    public long getIndex() {
-        return index;
-    }
-
-    /**
      * Get the election term in which this log entry was created.
      *
      * @return election term >= 0 in which this log entry was created
@@ -163,9 +156,18 @@ public abstract class LogEntry {
         return term;
     }
 
+    /**
+     * Get the log entry's position in the 0-indexed Raft log.
+     *
+     * @return index >= 0 of this log entry's position in the Raft log
+     */
+    public long getIndex() {
+        return index;
+    }
+
     @Override
     public int hashCode() {
-        return Objects.hashCode(type, index, term);
+        return Objects.hashCode(type, term, index);
     }
 
     @Override
@@ -174,7 +176,7 @@ public abstract class LogEntry {
         if (o == null || getClass() != o.getClass()) return false;
 
         LogEntry other = (LogEntry) o;
-        return type == other.type && index == other.index && term == other.term;
+        return type == other.type && term == other.term && index == other.index;
     }
 
     //----------------------------------------------------------------------------------------------------------------//
@@ -195,13 +197,12 @@ public abstract class LogEntry {
 
         /**
          * Constructor.
-         *
-         * @param index index > 0 of this log entry's position in the log
          * @param term election term > 0 in which this log entry was created
+         * @param index index > 0 of this log entry's position in the log
          * @param command instance of {@link Command} to be replicated
          */
-        public ClientEntry(long index, long term, Command command) {
-            super(Type.CLIENT, index, term);
+        public ClientEntry(long term, long index, Command command) {
+            super(Type.CLIENT, term, index);
             this.command = command;
         }
 
@@ -222,14 +223,14 @@ public abstract class LogEntry {
 
             ClientEntry other = (ClientEntry) o;
             return getType() == other.getType()
-                    && getIndex() == other.getIndex()
                     && getTerm() == other.getTerm()
+                    && getIndex() == other.getIndex()
                     && command.equals(other.command);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hashCode(getType(), getIndex(), getTerm(), command);
+            return Objects.hashCode(getType(), getTerm(), getIndex(), command);
         }
 
         @Override
@@ -237,8 +238,8 @@ public abstract class LogEntry {
             return Objects
                     .toStringHelper(this)
                     .add("type", getType())
-                    .add("index", getIndex())
                     .add("term", getTerm())
+                    .add("index", getIndex())
                     .add("command", command)
                     .toString();
         }
@@ -257,11 +258,11 @@ public abstract class LogEntry {
         /**
          * Constructor.
          *
-         * @param index index > 0 of this log entry's position in the log
          * @param term election term > 0 in which this log entry was created
+         * @param index index > 0 of this log entry's position in the log
          */
-        public ConfigurationEntry(long index, long term, Set<String> oldConfiguration, Set<String> newConfiguration) {
-            super(Type.CONFIGURATION, index, term);
+        public ConfigurationEntry(long term, long index, Set<String> oldConfiguration, Set<String> newConfiguration) {
+            super(Type.CONFIGURATION, term, index);
             this.oldConfiguration = oldConfiguration;
             this.newConfiguration = newConfiguration;
         }
@@ -283,15 +284,15 @@ public abstract class LogEntry {
             ConfigurationEntry other = (ConfigurationEntry) o;
 
             return getType() == other.getType()
-                    && getIndex() == other.getIndex()
                     && getTerm() == other.getTerm()
+                    && getIndex() == other.getIndex()
                     && oldConfiguration.equals(other.oldConfiguration)
                     && newConfiguration.equals(other.newConfiguration);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hashCode(getType(), getIndex(), getTerm(), oldConfiguration, newConfiguration);
+            return Objects.hashCode(getType(), getTerm(), getIndex(), oldConfiguration, newConfiguration);
         }
 
         @Override
@@ -299,8 +300,8 @@ public abstract class LogEntry {
             return Objects
                     .toStringHelper(this)
                     .add("type", getType())
-                    .add("index", getIndex())
                     .add("term", getTerm())
+                    .add("index", getIndex())
                     .add("oldConfiguration", oldConfiguration)
                     .add("newConfiguration", newConfiguration)
                     .toString();
@@ -320,11 +321,11 @@ public abstract class LogEntry {
         /**
          * Constructor.
          *
-         * @param index index > 0 of this log entry's position in the log
          * @param term election term > 0 in which this log entry was created
+         * @param index index > 0 of this log entry's position in the log
          */
-        public NoopEntry(long index, long term) {
-            super(Type.NOOP, index, term);
+        public NoopEntry(long term, long index) {
+            super(Type.NOOP, term, index);
         }
     }
 
@@ -332,8 +333,8 @@ public abstract class LogEntry {
     public String toString() {
         return Objects.toStringHelper(this)
                 .add("type", getType())
-                .add("index", getIndex())
                 .add("term", getTerm())
+                .add("index", getIndex())
                 .toString();
     }
 }

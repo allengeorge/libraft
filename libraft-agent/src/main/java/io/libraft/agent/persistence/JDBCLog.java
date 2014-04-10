@@ -136,12 +136,12 @@ public final class JDBCLog extends JDBCBase implements Log {
     }
 
     @Override
-    public @Nullable LogEntry get(final long logIndex) throws StorageException {
+    public @Nullable LogEntry get(final long index) throws StorageException {
         try {
             return executeQuery("SELECT * FROM entries WHERE log_index=?", new StatementWithReturnBlock<LogEntry>() {
                 @Override
                 public @Nullable LogEntry use(PreparedStatement statement) throws Exception {
-                    statement.setLong(1, logIndex);
+                    statement.setLong(1, index);
                     return withResultSet(statement, new ResultSetBlock<LogEntry>() {
                         @Override
                         public LogEntry use(ResultSet resultSet) throws Exception {
@@ -149,20 +149,20 @@ public final class JDBCLog extends JDBCBase implements Log {
                                 return null;
                             }
 
-                            long logIndex = resultSet.getLong("log_index");
+                            long returnedIndex = resultSet.getLong("log_index");
                             long term = resultSet.getLong("term");
                             LogEntry.Type type = mapDatabaseTypeToLogEntryType(resultSet.getInt("type"));
                             byte[] serializedData = resultSet.getBytes("data");
 
-                            checkState(!resultSet.next(), "entries: incorrect rows for logIndex:%s", logIndex);
+                            checkState(!resultSet.next(), "entries: incorrect rows for index:%s", returnedIndex);
 
-                            return newLogEntryFromDatabaseRow(type, logIndex, term, serializedData);
+                            return newLogEntryFromDatabaseRow(type, term, returnedIndex, serializedData);
                         }
                     });
                 }
             });
         } catch (Exception e) {
-            throw new StorageException(String.format("fail get log entry at %d", logIndex), e);
+            throw new StorageException(String.format("fail get log entry at %d", index), e);
         }
     }
 
@@ -181,8 +181,7 @@ public final class JDBCLog extends JDBCBase implements Log {
 
                             return newLogEntryFromDatabaseRow(
                                     mapDatabaseTypeToLogEntryType(resultSet.getInt("type")),
-                                    resultSet.getLong("log_index"),
-                                    resultSet.getLong("term"),
+                                    resultSet.getLong("term"), resultSet.getLong("log_index"),
                                     resultSet.getBytes("data"));
                         }
                     });
@@ -208,8 +207,7 @@ public final class JDBCLog extends JDBCBase implements Log {
 
                             return newLogEntryFromDatabaseRow(
                                     mapDatabaseTypeToLogEntryType(resultSet.getInt("type")),
-                                    resultSet.getLong("log_index"),
-                                    resultSet.getLong("term"),
+                                    resultSet.getLong("term"), resultSet.getLong("log_index"),
                                     resultSet.getBytes("data"));
                         }
                     });
@@ -235,7 +233,7 @@ public final class JDBCLog extends JDBCBase implements Log {
                                 public Boolean use(ResultSet resultSet) throws Exception {
                                     resultSet.next();
                                     long count = resultSet.getInt(1);
-                                    checkState(count == 0 || count == 1, "entries: logIndex:%s incorrect row count:", logEntry.getIndex(), count);
+                                    checkState(count == 0 || count == 1, "entries: index:%s incorrect row count:", logEntry.getIndex(), count);
                                     return count == 1;
                                 }
                             });
@@ -291,7 +289,7 @@ public final class JDBCLog extends JDBCBase implements Log {
                 }
             });
         } catch (Exception e) {
-            throw new StorageException(String.format("fail truncate log from logIndex %d", index), e);
+            throw new StorageException(String.format("fail truncate log from index %d", index), e);
         }
     }
 
@@ -340,20 +338,20 @@ public final class JDBCLog extends JDBCBase implements Log {
         }
     }
 
-    private LogEntry newLogEntryFromDatabaseRow(LogEntry.Type type, long logIndex, long term, byte[] serializedData) throws IOException {
+    private LogEntry newLogEntryFromDatabaseRow(LogEntry.Type type, long term, long index, byte[] serializedData) throws IOException {
         switch (type) {
             case SENTINEL:
-                checkArgument(logIndex == LogEntry.SENTINEL.getIndex(), "mismatched sentinel logIndex:%s", logIndex);
                 checkArgument(term == LogEntry.SENTINEL.getTerm(), "mismatched sentinel term:%s", term);
+                checkArgument(index == LogEntry.SENTINEL.getIndex(), "mismatched sentinel index:%s", index);
                 return LogEntry.SENTINEL;
             case NOOP:
-                return new LogEntry.NoopEntry(logIndex, term);
+                return new LogEntry.NoopEntry(term, index);
             case CONFIGURATION:
-                return new LogEntry.ConfigurationEntry(logIndex, term, Sets.<String>newHashSet(), Sets.<String>newHashSet());
+                return new LogEntry.ConfigurationEntry(term, index, Sets.<String>newHashSet(), Sets.<String>newHashSet());
             case CLIENT:
                 InputStream in = new ByteArrayInputStream(serializedData);
                 Command command = commandDeserializer.deserialize(in);
-                return new LogEntry.ClientEntry(logIndex, term, command);
+                return new LogEntry.ClientEntry(term, index, command);
             default:
                 throw new IllegalArgumentException("unrecognized type:" + type.name());
         }

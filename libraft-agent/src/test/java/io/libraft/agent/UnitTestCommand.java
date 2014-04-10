@@ -31,6 +31,8 @@ package io.libraft.agent;
 import com.google.common.base.Objects;
 import io.libraft.Command;
 
+import javax.annotation.Nullable;
+
 public final class UnitTestCommand implements Command {
 
     private final String value;
@@ -48,7 +50,7 @@ public final class UnitTestCommand implements Command {
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(@Nullable Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
 

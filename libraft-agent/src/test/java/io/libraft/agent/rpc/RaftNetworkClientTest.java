@@ -149,10 +149,10 @@ public final class RaftNetworkClientTest {
 
     @Test
     public void shouldProduceAndConsumeRequestVote() throws RPCException {
-        client0.requestVote(ClusterMembersFixture.RAFT_MEMBER_1.getId(), 10, 20, 9);
+        client0.requestVote(ClusterMembersFixture.RAFT_MEMBER_1.getId(), 10, 9, 20);
 
         verifyNoMoreInteractions(client0RPCReceiver);
-        verify(client1RPCReceiver).onRequestVote(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 20, 9);
+        verify(client1RPCReceiver).onRequestVote(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 9, 20);
     }
 
     @Test
@@ -165,23 +165,23 @@ public final class RaftNetworkClientTest {
 
     @Test
     public void shouldProduceAndConsumeHeartbeatAppendEntries() throws RPCException {
-        client0.appendEntries(ClusterMembersFixture.RAFT_MEMBER_1.getId(), 10, 299, 300, 9, null);
+        client0.appendEntries(ClusterMembersFixture.RAFT_MEMBER_1.getId(), 10, 299, 9, 300, null);
 
         verifyNoMoreInteractions(client0RPCReceiver);
-        verify(client1RPCReceiver).onAppendEntries(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 299, 300, 9, null);
+        verify(client1RPCReceiver).onAppendEntries(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 299, 9, 300, null);
     }
 
     @Test
     public void shouldProduceAndConsumeNonHeartbeatAppendEntries() throws RPCException {
          List<LogEntry> entries = Lists.newArrayList(
-                new LogEntry.NoopEntry(302, 10),
-                new LogEntry.ClientEntry(303, 10, new UnitTestCommand())
+                new LogEntry.NoopEntry(10, 302),
+                new LogEntry.ClientEntry(10, 303, new UnitTestCommand())
         );
 
-        client0.appendEntries(ClusterMembersFixture.RAFT_MEMBER_1.getId(), 10, 300, 301, 10, entries);
+        client0.appendEntries(ClusterMembersFixture.RAFT_MEMBER_1.getId(), 10, 300, 10, 301, entries);
 
         verifyNoMoreInteractions(client0RPCReceiver);
-        verify(client1RPCReceiver).onAppendEntries(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 300, 301, 10, entries);
+        verify(client1RPCReceiver).onAppendEntries(ClusterMembersFixture.RAFT_MEMBER_0.getId(), 10, 300, 10, 301, entries);
     }
 
     @Test

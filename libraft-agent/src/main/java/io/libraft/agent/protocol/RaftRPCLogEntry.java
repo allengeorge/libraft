@@ -89,8 +89,8 @@ public abstract class RaftRPCLogEntry {
             LogEntry.Type type = logEntry.getType();
 
             provider.defaultSerializeField(LOG_ENTRY_TYPE_FIELD, logEntry.getType().name(), generator);
-            provider.defaultSerializeField(LOG_ENTRY_INDEX_FIELD, logEntry.getIndex(), generator);
             provider.defaultSerializeField(LOG_ENTRY_TERM_FIELD, logEntry.getTerm(), generator);
+            provider.defaultSerializeField(LOG_ENTRY_INDEX_FIELD, logEntry.getIndex(), generator);
 
             switch (type) {
                 case CLIENT:
@@ -117,20 +117,20 @@ public abstract class RaftRPCLogEntry {
             ObjectCodec codec = parser.getCodec();
             JsonNode logEntryNode = codec.readTree(parser);
 
-            long index = logEntryNode.get(LOG_ENTRY_INDEX_FIELD).asLong();
             long term = logEntryNode.get(LOG_ENTRY_TERM_FIELD).asLong();
+            long index = logEntryNode.get(LOG_ENTRY_INDEX_FIELD).asLong();
 
             String stringType = logEntryNode.get(LOG_ENTRY_TYPE_FIELD).textValue();
             if (stringType.equals(LogEntry.Type.NOOP.name())) {
-                return new LogEntry.NoopEntry(index, term);
+                return new LogEntry.NoopEntry(term, index);
 
             } else if (stringType.equals(LogEntry.Type.CLIENT.name())) {
                 JsonNode commandNode = logEntryNode.get(CLIENT_ENTRY_COMMAND_FIELD);
                 Command command = codec.treeToValue(commandNode, Command.class);
-                return new LogEntry.ClientEntry(index, term, command);
+                return new LogEntry.ClientEntry(term, index, command);
 
             } else if (stringType.equals(LogEntry.Type.CONFIGURATION.name())) {
-                return new LogEntry.ConfigurationEntry(index, term, Sets.<String>newHashSet(), Sets.<String>newHashSet());
+                return new LogEntry.ConfigurationEntry(term, index, Sets.<String>newHashSet(), Sets.<String>newHashSet());
 
             } else {
                 throw new JsonMappingException("unknown type " + stringType);

@@ -31,7 +31,6 @@ package io.libraft.algorithm;
 import com.google.common.collect.ImmutableSet;
 import io.libraft.RaftListener;
 import io.libraft.SnapshotWriter;
-import io.libraft.testlib.TestLoggingRule;
 import org.hamcrest.Description;
 import org.hamcrest.Matcher;
 import org.hamcrest.TypeSafeMatcher;
@@ -160,10 +159,10 @@ public final class RaftAlgorithmSnapshotTest {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1)  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                NOOP(1, 2),
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5)  // <------ we've committed up to here (we've committed exactly the minimum number required)
         };
         insertIntoLog(log, entries);
 
@@ -211,19 +210,19 @@ public final class RaftAlgorithmSnapshotTest {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (well more than the minimum)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                NOOP(1, 2),
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (well more than the minimum)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         insertIntoLog(log, entries);
 
@@ -268,22 +267,22 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndSnapshotExistsAndEnoughLogEntriesHaveBeenGeneratedAndCommitted() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -332,22 +331,22 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldCallWriteSnapshotRepeatedlyOnListenerWhenSnapshotTimeoutOccursAndSnapshotExistsAndEnoughLogEntriesHaveBeenGeneratedAndCommitted() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -417,19 +416,19 @@ public final class RaftAlgorithmSnapshotTest {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                NOOP(1, 2),
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         insertIntoLog(log, entries);
 
@@ -446,8 +445,8 @@ public final class RaftAlgorithmSnapshotTest {
         // - snapshot0
         // - snapshot1
         // - ...
-        UnitTestSnapshot snapshot0 = new UnitTestSnapshot(5, 1);
-        UnitTestSnapshot snapshot1 = new UnitTestSnapshot(11, 1);
+        UnitTestSnapshot snapshot0 = new UnitTestSnapshot(1, 5);
+        UnitTestSnapshot snapshot1 = new UnitTestSnapshot(1, 11);
         when(snapshotsStore.getLatestSnapshot()).thenReturn(null).thenReturn(snapshot0).thenReturn(snapshot1);
 
         //
@@ -521,23 +520,23 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldMakeCorrectSequenceOfWriteSnapshotCallsOnListenerWhenSnapshotTimeoutOccurs() throws StorageException {
         // first we start off with a snapshot at index 6, then pretend that a new snapshot is created at index 11
-        UnitTestSnapshot snapshot0 = new UnitTestSnapshot(6, 1);
-        UnitTestSnapshot snapshot1 = new UnitTestSnapshot(11, 1);
+        UnitTestSnapshot snapshot0 = new UnitTestSnapshot(1, 6);
+        UnitTestSnapshot snapshot1 = new UnitTestSnapshot(1, 11);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),
-                CLIENT(12, 4, new UnitTestCommand()), // <------ we've committed up to here (we've committed just one more than the minimum number we'll snapshot after)
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),
+                CLIENT(4, 12, new UnitTestCommand()), // <------ we've committed up to here (we've committed just one more than the minimum number we'll snapshot after)
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -632,18 +631,18 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndSnapshotExistsAndEnoughLogEntriesHaveBeenGeneratedAndCommittedNoOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -717,7 +716,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotCallWriteSnapshotOnListenerIfOnlySnapshotExists() throws StorageException {
         // we have a snapshot that contains data to index 8 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(8L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 8L);
         when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
 
         // set the current term
@@ -763,9 +762,9 @@ public final class RaftAlgorithmSnapshotTest {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 CLIENT(1, 1, new UnitTestCommand()),
-                NOOP(2, 1),
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1), // <------ we've committed up to here
+                NOOP(1, 2),
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4), // <------ we've committed up to here
         };
         insertIntoLog(log, entries);
 
@@ -811,19 +810,19 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndSnapshotExistsAndNotEnoughLogEntriesHaveBeenGenerated() throws StorageException {
         // we have a snapshot that contains data to index 8 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(8L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 8L);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -874,13 +873,13 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndNotEnoughLogEntriesHaveBeenGeneratedNoOverlap() throws StorageException {
         // we have a snapshot that contains data to index 8 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(8L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 8L);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -933,13 +932,13 @@ public final class RaftAlgorithmSnapshotTest {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 CLIENT(1, 1, new UnitTestCommand()),
-                NOOP(2, 1),
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1), // <------ we've committed up to here
-                CLIENT(5, 1, new UnitTestCommand()),
-                CLIENT(6, 1, new UnitTestCommand()),
-                NOOP(7, 1),
-                NOOP(8, 1),
+                NOOP(1, 2),
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4), // <------ we've committed up to here
+                CLIENT(1, 5, new UnitTestCommand()),
+                CLIENT(1, 6, new UnitTestCommand()),
+                NOOP(1, 7),
+                NOOP(1, 8),
         };
         insertIntoLog(log, entries);
 
@@ -985,22 +984,22 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndSnapshotExistsAndNotEnoughLogEntriesHaveBeenCommitted() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()), // <------ we've committed up to here
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()), // <------ we've committed up to here
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -1051,18 +1050,18 @@ public final class RaftAlgorithmSnapshotTest {
         @Test
     public void shouldNotCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndSnapshotExistsAndNotEnoughLogEntriesHaveBeenCommittedNoOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(7, 3, new UnitTestCommand()), // <------ we've committed up to here
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(3, 7, new UnitTestCommand()), // <------ we've committed up to here
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -1114,19 +1113,19 @@ public final class RaftAlgorithmSnapshotTest {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (well more than the minimum)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                NOOP(1, 2),
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (well more than the minimum)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         insertIntoLog(log, entries);
 
@@ -1252,12 +1251,12 @@ public final class RaftAlgorithmSnapshotTest {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 1),  // <----- we've committed up to here
-                NOOP(4, 1),
-                NOOP(5, 1),
-                NOOP(6, 1),
-                NOOP(7, 1),
+                NOOP(1, 2),
+                NOOP(1, 3),  // <----- we've committed up to here
+                NOOP(1, 4),
+                NOOP(1, 5),
+                NOOP(1, 6),
+                NOOP(1, 7),
         };
         insertIntoLog(log, entries);
 
@@ -1295,18 +1294,18 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldThrowIllegalArgumentExceptionIfSnapshotWriterHasIndexGreaterThanCommitIndexAndSnapshotExists() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
 
         // we have a log that contains entries from index 7 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -1364,8 +1363,8 @@ public final class RaftAlgorithmSnapshotTest {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 NOOP(1, 1),
-                NOOP(2, 1),
-                NOOP(3, 1),  // <----- we've committed up to here
+                NOOP(1, 2),
+                NOOP(1, 3),  // <----- we've committed up to here
         };
         insertIntoLog(log, entries);
 
@@ -1434,7 +1433,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNoopIfSnapshotWriterContainsValidIndexButLogIsNullAndSnapshotExists() throws StorageException {
         // we have a snapshot until index 7
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(7, 3));
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(3, 7));
 
         // empty out the log
         clearLog(log);
@@ -1479,13 +1478,13 @@ public final class RaftAlgorithmSnapshotTest {
         final LogEntry[] entries = new LogEntry[]{
                 SENTINEL(),
                 CLIENT(1, 1, new UnitTestCommand()),
-                NOOP(2, 1),
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                CLIENT(5, 1, new UnitTestCommand()),
-                CLIENT(6, 1, new UnitTestCommand()),
-                NOOP(7, 1),  // <------ we've committed up to here
-                NOOP(8, 1),
+                NOOP(1, 2),
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                CLIENT(1, 5, new UnitTestCommand()),
+                CLIENT(1, 6, new UnitTestCommand()),
+                NOOP(1, 7),  // <------ we've committed up to here
+                NOOP(1, 8),
         };
         insertIntoLog(log, entries);
 
@@ -1528,18 +1527,18 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotAddSnapshotIfSnapshotWriterSubmittedWithoutEnoughLogEntriesForLogAndSnapshotNoOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
 
         // we have a log that contains entries from index 7 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -1587,18 +1586,18 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotAddSnapshotIfSnapshotWriterSubmittedWithoutEnoughLogEntriesAndLastAppliedIndexInSnapshotForLogAndSnapshotNoOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
 
         // we have a log that contains entries from index 7 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -1650,22 +1649,22 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotAddSnapshotIfSnapshotWriterSubmittedWithoutEnoughLogEntriesForLogAndSnapshotWithOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -1716,22 +1715,22 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotAddSnapshotIfSnapshotWriterSubmittedWithoutEnoughLogEntriesAndLastAppliedIndexInSnapshotForLogAndSnapshotWithOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -1782,13 +1781,13 @@ public final class RaftAlgorithmSnapshotTest {
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
                 CLIENT(1, 1, new UnitTestCommand()),
-                NOOP(2, 1),
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                CLIENT(5, 1, new UnitTestCommand()),
-                CLIENT(6, 1, new UnitTestCommand()),
-                NOOP(7, 1),  // <------ we've committed up to here
-                NOOP(8, 1),
+                NOOP(1, 2),
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                CLIENT(1, 5, new UnitTestCommand()),
+                CLIENT(1, 6, new UnitTestCommand()),
+                NOOP(1, 7),  // <------ we've committed up to here
+                NOOP(1, 8),
         };
         insertIntoLog(log, entries);
 
@@ -1836,18 +1835,18 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldAddSnapshotIfSnapshotWriterSubmittedWithEnoughLogEntriesForLogAndSnapshotNoOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
 
         // we have a log that contains entries from index 7 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -1900,22 +1899,22 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldAddSnapshotIfSnapshotWriterSubmittedWithEnoughLogEntriesForLogAndSnapshotWithOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -1969,18 +1968,18 @@ public final class RaftAlgorithmSnapshotTest {
     public void shouldHandleRepeatedCallsToSnapshotWrittenWithTheSameLastAppliedIndexCorrectly() throws StorageException {
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -1996,10 +1995,10 @@ public final class RaftAlgorithmSnapshotTest {
         store.setCommitIndex(commitIndex);
 
         // on the first call we return the existing snapshot: the one than contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot0 = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot0 = new UnitTestSnapshot(1, 6L);
 
         // on the first call we return the snapshot created as the result of the first call to "snapshotWritten"
-        SnapshotsStore.ExtendedSnapshot storedSnapshot1 = new UnitTestSnapshot(11L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot1 = new UnitTestSnapshot(1, 11L);
 
         // have the snapshot store return the first snapshot, followed by the second, repeatedly
         when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot0).thenReturn(storedSnapshot1);
@@ -2082,18 +2081,18 @@ public final class RaftAlgorithmSnapshotTest {
     public void shouldHandleOutOfOrderCallsToSnapshotWrittenCorrectly() throws StorageException {
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
-                CLIENT(3, 1, new UnitTestCommand()),
-                NOOP(4, 1),
-                NOOP(5, 1),
-                CLIENT(6, 3, new UnitTestCommand()),
-                CLIENT(7, 3, new UnitTestCommand()),
-                NOOP(8, 3),
-                NOOP(9, 3),
-                NOOP(10, 3),
-                CLIENT(11, 4, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
-                CLIENT(12, 4, new UnitTestCommand()),
-                CLIENT(13, 4, new UnitTestCommand()),
-                CLIENT(14, 4, new UnitTestCommand())
+                CLIENT(1, 3, new UnitTestCommand()),
+                NOOP(1, 4),
+                NOOP(1, 5),
+                CLIENT(3, 6, new UnitTestCommand()),
+                CLIENT(3, 7, new UnitTestCommand()),
+                NOOP(3, 8),
+                NOOP(3, 9),
+                NOOP(3, 10),
+                CLIENT(4, 11, new UnitTestCommand()),  // <------ we've committed up to here (we've committed exactly the minimum number required)
+                CLIENT(4, 12, new UnitTestCommand()),
+                CLIENT(4, 13, new UnitTestCommand()),
+                CLIENT(4, 14, new UnitTestCommand())
         };
         clearLog(log); // clear out the log completely - we don't even want the sentinel
         insertIntoLog(log, entries);
@@ -2109,10 +2108,10 @@ public final class RaftAlgorithmSnapshotTest {
         store.setCommitIndex(commitIndex);
 
         // on the first call we return the existing snapshot: the one than contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot0 = new UnitTestSnapshot(6L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot0 = new UnitTestSnapshot(1, 6L);
 
         // on the first call we return the snapshot created as the result of the first call to "snapshotWritten"
-        SnapshotsStore.ExtendedSnapshot storedSnapshot1 = new UnitTestSnapshot(11L, 1);
+        SnapshotsStore.ExtendedSnapshot storedSnapshot1 = new UnitTestSnapshot(1, 11L);
 
         // have the snapshot store return the first snapshot, followed by the second, repeatedly
         when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot0).thenReturn(storedSnapshot1);

@@ -46,8 +46,8 @@ import java.util.Collection;
 public final class AppendEntries extends RaftRPC {
 
     private static final String COMMIT_INDEX = "commitIndex";
-    private static final String PREV_LOG_INDEX = "prevLogIndex";
     private static final String PREV_LOG_TERM = "prevLogTerm";
+    private static final String PREV_LOG_INDEX = "prevLogIndex";
     private static final String ENTRIES = "entries";
 
     @Min(value = 0)
@@ -55,12 +55,12 @@ public final class AppendEntries extends RaftRPC {
     private final long commitIndex;
 
     @Min(value = 0)
-    @JsonProperty(PREV_LOG_INDEX)
-    private final long prevLogIndex;
-
-    @Min(value = 0)
     @JsonProperty(PREV_LOG_TERM)
     private final long prevLogTerm;
+
+    @Min(value = 0)
+    @JsonProperty(PREV_LOG_INDEX)
+    private final long prevLogIndex;
 
     @SuppressWarnings("NullableProblems")
     @Valid
@@ -76,8 +76,8 @@ public final class AppendEntries extends RaftRPC {
      * @param destination unique id of the Raft server that is the intended recipient
      * @param term election term in which the message was generated
      * @param commitIndex index of the last {@code LogEntry} that the {@code source} server believes is committed
-     * @param prevLogIndex index of the {@code LogEntry} immediately before the first {@code LogEntry} in {@code entries}
      * @param prevLogTerm election term in which the {@code LogEntry} at {@code prevLogIndex} was created
+     * @param prevLogIndex index of the {@code LogEntry} immediately before the first {@code LogEntry} in {@code entries}
      * @param entries sequence of monotonic, gapless, {@code LogEntry} instances with
      *                indices {@code prevLogIndex + 1}, {@code prevLogIndex + 2} .. {@code prevLogIndex + entries.count()}.
      *                {@code entries} may be null if this AppendEntries message is a heartbeat
@@ -89,13 +89,13 @@ public final class AppendEntries extends RaftRPC {
                          @JsonProperty(DESTINATION) String destination,
                          @JsonProperty(TERM) long term,
                          @JsonProperty(COMMIT_INDEX) long commitIndex,
-                         @JsonProperty(PREV_LOG_INDEX) long prevLogIndex,
                          @JsonProperty(PREV_LOG_TERM) long prevLogTerm,
+                         @JsonProperty(PREV_LOG_INDEX) long prevLogIndex,
                          @JsonProperty(ENTRIES) @Nullable Collection<LogEntry> entries) {
         super(source, destination, term);
         this.commitIndex = commitIndex;
-        this.prevLogIndex = prevLogIndex;
         this.prevLogTerm = prevLogTerm;
+        this.prevLogIndex = prevLogIndex;
         this.entries = entries;
     }
 
@@ -109,21 +109,21 @@ public final class AppendEntries extends RaftRPC {
     }
 
     /**
-     * Get the log index after which entries are meant to be appended.
-     *
-     * @return index >=0 of the {@link LogEntry} immediately before the first entry in {@link AppendEntries#getEntries()}
-     */
-    public long getPrevLogIndex() {
-        return prevLogIndex;
-    }
-
-    /**
      * Get the election term in which the {@code LogEntry} at {@code prevLogIndex} was created.
      *
      * @return election term >= 0 in which the {@link LogEntry} at {@link AppendEntries#getPrevLogIndex()} was created
      */
     public long getPrevLogTerm() {
         return prevLogTerm;
+    }
+
+    /**
+     * Get the log index after which entries are meant to be appended.
+     *
+     * @return index >=0 of the {@link LogEntry} immediately before the first entry in {@link AppendEntries#getEntries()}
+     */
+    public long getPrevLogIndex() {
+        return prevLogIndex;
     }
 
     /**
@@ -139,11 +139,11 @@ public final class AppendEntries extends RaftRPC {
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(getSource(), getDestination(), getTerm(), commitIndex, prevLogIndex, prevLogTerm, entries);
+        return Objects.hashCode(getSource(), getDestination(), getTerm(), commitIndex, prevLogTerm, prevLogIndex, entries);
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(@Nullable Object o) {
         if (o == null || !(o instanceof AppendEntries)) {
             return false;
         }
@@ -156,8 +156,8 @@ public final class AppendEntries extends RaftRPC {
                 && getDestination().equalsIgnoreCase(other.getDestination())
                 && getTerm() == other.getTerm()
                 && commitIndex == other.commitIndex
-                && prevLogIndex == other.prevLogIndex
                 && prevLogTerm == other.prevLogTerm
+                && prevLogIndex == other.prevLogIndex
                 && (entries != null ? entries.equals(other.entries) : other.entries == null);
     }
 
@@ -169,8 +169,8 @@ public final class AppendEntries extends RaftRPC {
                 .add(DESTINATION, getDestination())
                 .add(TERM, getTerm())
                 .add(COMMIT_INDEX, commitIndex)
-                .add(PREV_LOG_INDEX, prevLogIndex)
                 .add(PREV_LOG_TERM, prevLogTerm)
+                .add(PREV_LOG_INDEX, prevLogIndex)
                 .add(ENTRIES, entries)
                 .toString();
     }

@@ -3,6 +3,6 @@
     "source": "SERVER_02",
     "destination": "SERVER_04",
     "term": 32,
-    "lastLogIndex": 10,
-    "lastLogTerm": 31
+    "lastLogTerm": 31,
+    "lastLogIndex": 10
 }

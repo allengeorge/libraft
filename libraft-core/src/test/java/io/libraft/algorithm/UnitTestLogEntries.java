@@ -53,12 +53,12 @@ abstract class UnitTestLogEntries {
         return LogEntry.SENTINEL;
     }
 
-    static LogEntry.NoopEntry NOOP(long index, long term) {
-        return new LogEntry.NoopEntry(index, term);
+    static LogEntry.NoopEntry NOOP(long term, long index) {
+        return new LogEntry.NoopEntry(term, index);
     }
 
-    static LogEntry.ClientEntry CLIENT(long index, long term, Command command) {
-        return new LogEntry.ClientEntry(index, term, command);
+    static LogEntry.ClientEntry CLIENT(long term, long index, Command command) {
+        return new LogEntry.ClientEntry(term, index, command);
     }
 
     //================================================================================================================//

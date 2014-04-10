@@ -62,12 +62,11 @@ public interface RPCSender {
      *
      * @param server unique id of the Raft server to which the message should be sent
      * @param term election term in which this message was generated
-     * @param lastLogIndex index of the last {@code LogEntry} in the local Raft server's Raft log
      * @param lastLogTerm election term in which the {@code LogEntry} at {@code lastLogIndex} was created
-     *
+     * @param lastLogIndex index of the last {@code LogEntry} in the local Raft server's Raft log
      * @see LogEntry
      */
-    void requestVote(String server, long term, long lastLogIndex, long lastLogTerm) throws RPCException;
+    void requestVote(String server, long term, long lastLogTerm, long lastLogIndex) throws RPCException;
 
     /**
      * Send a RequestVoteReply. Response to a RequestVote.
@@ -84,15 +83,15 @@ public interface RPCSender {
      * @param server unique id of the Raft server to which the message should be sent
      * @param term election term in which this message was generated
      * @param commitIndex index of the last {@code LogEntry} that the local Raft server believes to be committed
-     * @param prevLogIndex index of the {@code LogEntry} immediately before the first {@code LogEntry} in {@code entries}
      * @param prevLogTerm election term in which the {@code LogEntry} at {@code prevLogIndex} was created
+     * @param prevLogIndex index of the {@code LogEntry} immediately before the first {@code LogEntry} in {@code entries}
      * @param entries sequence of monotonic, gapless, {@code LogEntry} instances with
      *                indices {@code prevLogIndex + 1}, {@code prevLogIndex + 2} .. {@code prevLogIndex + entries.count()}.
      *                {@code null} if this AppendEntries message is a heartbeat
      *
      * @see LogEntry
      */
-    void appendEntries(String server, long term, long commitIndex, long prevLogIndex, long prevLogTerm, @Nullable Collection<LogEntry> entries) throws RPCException;
+    void appendEntries(String server, long term, long commitIndex, long prevLogTerm, long prevLogIndex, @Nullable Collection<LogEntry> entries) throws RPCException;
 
     /**
      * Send an AppendEntriesReply. Response to an AppendEntries.
