@@ -1,4 +1,4 @@
-Copyright (c) 2013, Allen A. George <allen dot george at gmail dot com>
+Copyright (c) 2013 - 2014, Allen A. George <allen dot george at gmail dot com>
 
 All rights reserved.
 
