@@ -129,7 +129,7 @@ import static io.libraft.algorithm.SnapshotsStore.ExtendedSnapshotWriter;
  * and will continue to operate correctly after an unhandled error.
  *
  * <h3>Exception Handling</h3>
- * There are firve major entry points into {@code RaftAlgorithm}:
+ * There are five major entry points into {@code RaftAlgorithm}:
  * <ol>
  *     <li>Timer tasks</li>
  *     <li>on[MessageName]</li>
@@ -271,6 +271,10 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
         private long term;
         private long index;
+
+        private LogicalTimestamp(LogEntry entry) {
+            this(entry.getTerm(), entry.getIndex());
+        }
 
         private LogicalTimestamp(long term, long index) {
             this.term = term;
@@ -608,7 +612,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
              sender,
              store,
              log,
-                snapshotsStore,
+             snapshotsStore,
              listener,
              self,
              cluster,
@@ -799,10 +803,9 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     }
 
     private void setupPersistentState() throws StorageException {
-        ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
         LogEntry firstLog = log.getFirst();
-        LogEntry lastLog = log.getLast();
-        if (latestSnapshot == null && lastLog == null) { // first time starting up
+        ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
+        if (firstLog == null && latestSnapshot == null) { // first time starting up
             store.setCurrentTerm(0);
             store.setCommitIndex(0);
 
@@ -812,10 +815,8 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             store.clearVotedFor();
             store.setVotedFor(0, null);
         } else { // do incredibly basic sanity checks (doesn't check if log in good state or if snapshot actually exists)
-            // TODO (AG): I would like a method that would return the last votedFor
-            long currentTerm = store.getCurrentTerm();
-            long commitIndex = store.getCommitIndex();
-            checkSnapshotLogAndCommitIndicesAndTerms(latestSnapshot, firstLog, lastLog, currentTerm, commitIndex);
+            // TODO (AG): I would like a method that would return the last votedFor to check if the term > currentTerm
+            checkIndicesAndTerms();
         }
     }
 
@@ -987,15 +988,15 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         long currentTerm = store.getCurrentTerm() + 1;
         becomeCandidate(currentTerm);
 
-        LogEntry lastLog = checkNotNull(log.getLast());
-        sendRequestVoteRPCs(currentTerm, lastLog.getIndex(), lastLog.getTerm());
+        LogicalTimestamp last = getLast();
+        sendRequestVoteRPCs(currentTerm, last.getTerm(), last.getIndex());
     }
 
-    private void sendRequestVoteRPCs(final long electionTerm, final long lastLogIndex, final long lastLogTerm) {
+    private void sendRequestVoteRPCs(final long electionTerm, final long lastLogTerm, final long lastLogIndex) {
         AlgorithmTimeoutTask rpcTimeoutTask = new AlgorithmTimeoutTask("request vote rpc timeout") {
             @Override
             protected void runSafely(Timer.TimeoutHandle timeoutHandle) throws Exception {
-                handleRequestVoteRPCTimeout(electionTerm, lastLogIndex, lastLogTerm);
+                handleRequestVoteRPCTimeout(electionTerm, lastLogTerm, lastLogIndex);
             }
         };
 
@@ -1014,7 +1015,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         }
     }
 
-    private void handleRequestVoteRPCTimeout(long electionTerm, long lastLogIndex, long lastLogTerm) throws StorageException {
+    private void handleRequestVoteRPCTimeout(long electionTerm, long lastLogTerm, long lastLogIndex) throws StorageException {
         LOGGER.trace("{}: handle RequestVote RPC timeout for term {}", self, electionTerm);
 
         if (!running) {
@@ -1037,7 +1038,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
         int voteCount = countGrantedVotes();
         if (voteCount < clusterQuorumSize) {
-            sendRequestVoteRPCs(electionTerm, lastLogIndex, lastLogTerm);
+            sendRequestVoteRPCs(electionTerm, lastLogTerm, lastLogIndex);
         }
     }
 
@@ -1171,11 +1172,11 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         checkArgument(currentTerm == expectedCurrentTerm, "currentTerm:%s expectedCurrentTerm:%s", currentTerm, expectedCurrentTerm);
 
         String votedFor = store.getVotedFor(expectedCurrentTerm);
-        LogEntry lastLog = checkNotNull(log.getLast());
+        LogicalTimestamp last = getLast();
 
         checkState(leader == null, "leader:%s", leader);
         checkState(checkNotNull(votedFor).equals(self), "currentTerm:%s votedFor:%s", currentTerm, votedFor);
-        checkState(lastLog.getTerm() < currentTerm, "currentTerm:%s lastLog:%s", currentTerm, lastLog);
+        checkState(last.getTerm() < currentTerm, "currentTerm:%s last:%s", currentTerm, last);
         checkState(commands.isEmpty(), "commands:%s", commands);
         checkState(role == Role.CANDIDATE, "invalid transition from %s -> %s", role, Role.LEADER);
 
@@ -1192,12 +1193,12 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         nextToApplyLogIndex = -1;
         votedServers.clear();
 
-        long lastLogIndex = lastLog.getIndex();
+        long lastIndex = last.getIndex();
 
         for (String member : cluster) {
             // start off by initializing nextIndex to our belief of their prefix
             // notice that it does _not_ include the NOOP entry that we're just about to add
-            serverData.put(member, new ServerDatum(lastLogIndex + 1, Phase.PREFIX_SEARCH));
+            serverData.put(member, new ServerDatum(lastIndex + 1, Phase.PREFIX_SEARCH));
         }
 
         // add a NOOP entry
@@ -1205,7 +1206,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         // it may be that there are people out there with more entries than I,
         // or fewer entries than I. by starting off early I can get everyone up
         // to speed more quickly and get a more accurate picture of their prefixes
-        log.put(new LogEntry.NoopEntry(currentTerm, lastLogIndex + 1));
+        log.put(new LogEntry.NoopEntry(currentTerm, lastIndex + 1));
 
         // send out the first heartbeat
         heartbeat(currentTerm);
@@ -1231,40 +1232,41 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         };
 
         long commitIndex = store.getCommitIndex();
-        LogEntry lastLog = checkNotNull(log.getLast());
+        LogicalTimestamp last = getLast();
 
-        checkState(commitIndex <= lastLog.getIndex());
+        checkState(commitIndex <= last.getIndex());
 
         long nextIndex;
-        long prevLogIndex;
-        long prevLogTerm;
+        long prevTerm;
+        long prevIndex;
         Collection<LogEntry> entries;
         for (String server : cluster) {
             nextIndex = serverData.get(server).nextIndex;
 
-            if (nextIndex == (lastLog.getIndex() + 1)) { // we believe their prefix matches (standard heartbeat)
-                prevLogIndex = lastLog.getIndex();
-                prevLogTerm = lastLog.getTerm();
+            if (nextIndex == (last.getIndex() + 1)) { // we believe their prefix matches (standard heartbeat)
+                prevTerm = last.getTerm();
+                prevIndex = last.getIndex();
                 entries = null;
             } else { // prefix mismatch (they need to be caught up), or, we don't know yet
+                // FIXME (AG): have to deal with snapshots and phases
                 LogEntry prevLog = checkNotNull(log.get(nextIndex - 1));
 
-                prevLogIndex = prevLog.getIndex();
-                prevLogTerm = prevLog.getTerm();
+                prevTerm = prevLog.getTerm();
+                prevIndex = prevLog.getIndex();
 
-                long entryCount = lastLog.getIndex() - prevLogIndex;
+                long entryCount = last.getIndex() - prevIndex;
 
                 // NOTE: when sending entries, you never include the prevLog.
                 // This is because the entries being added come _after_ prevLog, and
                 // prevLog{Index,Term} are simply used as safety checks
                 entries = Lists.newArrayListWithCapacity((int) entryCount);
-                for (long logIndex = prevLogIndex + 1; logIndex <= prevLogIndex + entryCount; logIndex++) {
+                for (long logIndex = prevIndex + 1; logIndex <= prevIndex + entryCount; logIndex++) {
                     entries.add(log.get(logIndex));
                 }
             }
 
             try {
-                sender.appendEntries(server, currentTerm, commitIndex, prevLogTerm, prevLogIndex, entries);
+                sender.appendEntries(server, currentTerm, commitIndex, prevTerm, prevIndex, entries);
             } catch (RPCException e) {
                 LOGGER.warn("{}: fail send heartbeat with {} entries to {} cause:{}", self, getEntryCount(entries), server, e.getMessage());
             }
@@ -1330,8 +1332,8 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             checkState(term == currentTerm, "term:%s currentTerm:%s", term, currentTerm);
 
             String votedFor = store.getVotedFor(term);
-            LogEntry selfLastLog = checkNotNull(log.getLast());
-            int candidateLogDominates = doesLogDominate(lastLogTerm, lastLogIndex, selfLastLog.getTerm(), selfLastLog.getIndex());
+            LogicalTimestamp selfLast = getLast();
+            int candidateLogDominates = doesLogDominate(lastLogTerm, lastLogIndex, selfLast.getTerm(), selfLast.getIndex());
             boolean voteGranted = false;
 
             // you can grant the vote if:
@@ -1517,6 +1519,8 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
             scheduleNextElectionTimeout();
 
+            // FIXME (AG): do I have to consider snapshots?
+
             LogEntry prevLog = log.get(prevLogIndex);
             if (prefixMismatch(prevLog, prevLogTerm)) {
                 LOGGER.trace("{}: prefix mismatch at index:{} expected term:{} entry:{}", self, prevLogIndex, prevLogTerm, prevLog);
@@ -1682,8 +1686,8 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             long lastAppliedIndex = prevLogIndex + entryCount;
 
             // check that they aren't applying more entries than we know of
-            LogEntry lastLog = checkNotNull(log.getLast());
-            checkArgument(lastAppliedIndex <= lastLog.getIndex(), "lastAppliedIndex:%s lastLog:%s", lastAppliedIndex, lastLog);
+            LogicalTimestamp last = getLast();
+            checkArgument(lastAppliedIndex <= last.getIndex(), "lastAppliedIndex:%s last:%s", lastAppliedIndex, last);
 
             if (lastAppliedIndex >= serverDatum.nextIndex) {
                 serverDatum.nextIndex = lastAppliedIndex + 1;
@@ -1692,7 +1696,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             }
 
             long originalCommitIndex = store.getCommitIndex();
-            long possibleCommitIndex = findPossibleCommitIndex(lastLog, originalCommitIndex);
+            long possibleCommitIndex = findPossibleCommitIndex(last.getIndex(), originalCommitIndex);
 
             if (possibleCommitIndex > originalCommitIndex) {
                 LogEntry potentialCommittedLog = checkNotNull(log.get(possibleCommitIndex), "possibleCommitIndex:%s", possibleCommitIndex);
@@ -1708,10 +1712,10 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         }
     }
 
-    private long findPossibleCommitIndex(LogEntry lastLog, long originalCommitIndex) {
+    private long findPossibleCommitIndex(long lastIndex, long originalCommitIndex) {
         ArrayList<Long> indices = Lists.newArrayListWithCapacity(serverData.size());
 
-        indices.add(lastLog.getIndex());
+        indices.add(lastIndex);
         for (ServerDatum serverDatum : serverData.values()) {
             if (serverDatum.phase == Phase.APPLYING) {
                 indices.add(serverDatum.nextIndex - 1);
@@ -1804,27 +1808,26 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
             // check that they actually attempted to set the last applied index
             long lastAppliedIndex = extendedSnapshotWriter.getIndex();
-            checkArgument(lastAppliedIndex >= 0, "lastAppliedIndex:%s", lastAppliedIndex);
+            checkArgument(lastAppliedIndex >= LogEntry.SENTINEL.getIndex(), "lastAppliedIndex:%s", lastAppliedIndex);
 
-            if (lastAppliedIndex == 0) {
+            if (lastAppliedIndex == LogEntry.SENTINEL.getIndex()) {
                 LOGGER.trace("{}: noop snapshot for {}", self, snapshotWriter);
                 return;
             }
 
-            // bounds checks
-            // check that they haven't claimed to apply more entries than committed
-            ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
-            LogEntry firstLog = log.getFirst();
-            LogEntry lastLog = log.getLast();
-            long currentTerm = store.getCurrentTerm();
-            long commitIndex = store.getCommitIndex();
+            // after this point we're working on a snapshot that actually has committed state
+            checkArgument(lastAppliedIndex > 0, "lastAppliedIndex:%s", lastAppliedIndex);
 
-            checkArgument(lastAppliedIndex > 0, "lastAppliedIndex:%s", lastAppliedIndex); // already dealt with '0' case
-            checkSnapshotLogAndCommitIndicesAndTerms(latestSnapshot, firstLog, lastLog, currentTerm, commitIndex);
+            // check that the underlying system is in a good state
+            checkIndicesAndTerms();
+
+            // check that they haven't claimed to apply more entries than committed
+            long commitIndex = store.getCommitIndex();
             checkArgument(lastAppliedIndex <= commitIndex, "lastAppliedIndex:%s commitIndex:%s", lastAppliedIndex, commitIndex); // this check must come after checking the snapshot, log and commit indices
 
             // this check allows us to avoid the situation where we
             // generate snapshots that don't actually have an impact on log length
+            ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
             long numEntriesInSnapshot;
             if (latestSnapshot != null) {
                 numEntriesInSnapshot = lastAppliedIndex - latestSnapshot.getIndex(); // check how many entries _from the end of the snapshot_ onwards are in this snapshot
@@ -1838,13 +1841,16 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             }
 
             // set the term for the last entry in the snapshot
-            LogEntry logEntry = checkNotNull(log.get(lastAppliedIndex));
-            long lastAppliedTerm = logEntry.getTerm();
+            LogEntry lastAppliedLog = checkNotNull(log.get(lastAppliedIndex));
+            long lastAppliedTerm = lastAppliedLog.getTerm();
             extendedSnapshotWriter.setTerm(lastAppliedTerm);
 
             // attempt to store the snapshot on disk and truncate the log
             snapshotsStore.storeSnapshot(extendedSnapshotWriter);
             // TODO (AG): truncate the log!
+
+            // recheck that we left the system in a good state
+            checkIndicesAndTerms();
         } catch (StorageException e) {
             handleStorageException(e);
         }
@@ -1863,12 +1869,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         checkArgument(indexToSearchFrom >= 0, "index:%s must be positive", indexToSearchFrom);
 
         try {
-            long currentTerm = store.getCurrentTerm();
             long commitIndex = store.getCommitIndex();
-            ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
-
-            // bounds checks
-            checkSnapshotLogAndCommitIndicesAndTerms(latestSnapshot, log.getFirst(), log.getLast(), currentTerm, commitIndex);
             checkArgument(indexToSearchFrom <= commitIndex, "indexToSearchFrom:%s commitIndex:%s", indexToSearchFrom, commitIndex);
 
             // there are no more entries that the caller can apply
@@ -1896,6 +1897,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             // 3. if the indexToSearchFrom is within the overlap area, pick a log entry if possible, otherwise, fall down to the snapshot
             //
 
+            ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
             Committed committed = null;
 
             // 1. try to find a log entry they can apply
@@ -1927,34 +1929,44 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         }
     }
 
-    private static void checkSnapshotLogAndCommitIndicesAndTerms(@Nullable ExtendedSnapshot latestSnapshot, @Nullable LogEntry firstLog, @Nullable LogEntry lastLog, long currentTerm, long commitIndex) {
-        checkArgument((firstLog == null && lastLog == null) || (firstLog != null && lastLog != null), "firstLog:%s lastLog:%s", firstLog, lastLog);
-        checkArgument(currentTerm >= LogEntry.SENTINEL.getTerm(), "currentTerm:%s", currentTerm);
-        checkArgument(commitIndex >= LogEntry.SENTINEL.getIndex(), "commitIndex:%s", commitIndex);
+    private void checkIndicesAndTerms() throws StorageException {
+        // variable definitions
+        long currentTerm = store.getCurrentTerm();
+
+        LogEntry firstLog = log.getFirst();
+        LogEntry lastLog = log.getLast();
+        ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
+
+        long commitIndex = store.getCommitIndex();
+
+        // actual checks
+        //
+        // NOTE: separate these two so that I can refactor the block below
+        // into a separate static method for testing directly if I want to
+
+        checkState((firstLog == null && lastLog == null) || (firstLog != null && lastLog != null), "firstLog:%s lastLog:%s", firstLog, lastLog);
+        checkState(currentTerm >= LogEntry.SENTINEL.getTerm(), "currentTerm:%s", currentTerm);
+        checkState(commitIndex >= LogEntry.SENTINEL.getIndex(), "commitIndex:%s", commitIndex);
 
         // can't have nothing
         checkState(lastLog != null || latestSnapshot != null, "both log and snapshot cannot be missing");
 
-        long lastTerm = LogEntry.SENTINEL.getTerm();
-        long lastIndex = LogEntry.SENTINEL.getIndex();
+        LogicalTimestamp last = new LogicalTimestamp(LogEntry.SENTINEL);
 
         // start off with the snapshot
         if (latestSnapshot != null) {
-            lastTerm = latestSnapshot.getTerm();
-            lastIndex = latestSnapshot.getIndex();
+            last = new LogicalTimestamp(latestSnapshot.getTerm(), latestSnapshot.getIndex());
         }
 
         // if a snapshot exists...
 
         // check that it has a valid term
-        checkState(lastTerm <= currentTerm, "lastTerm:%s currentTerm:%s", lastTerm, currentTerm);
+        checkState(last.getTerm() <= currentTerm, "lastTerm:%s currentTerm:%s", last.getTerm(), currentTerm);
         // and that it doesn't contain more entries than were committed
-        checkState(lastIndex <= commitIndex, "snapshot: lastIndex:%s commitIndex:%s", lastIndex, commitIndex);
+        checkState(last.getIndex() <= commitIndex, "snapshot: lastIndex:%s commitIndex:%s", last.getIndex(), commitIndex);
 
         // we have a log as well
         if (firstLog != null) {
-            // by the check at the beginning of this function we should have a lastLog
-            lastLog = checkNotNull(lastLog);
             // check the lower bound of the log
             if (latestSnapshot == null) {
                 // no snapshot? we have to start at the beginning then
@@ -1964,19 +1976,18 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
                 checkState(firstLog.getIndex() >= LogEntry.SENTINEL.getIndex(), "firstLogIndex:%s", firstLog.getIndex());
             }
             // ensure that there is no hole between the boundary of the snapshot and the lower limit of the log
-            checkState(firstLog.getIndex() <= lastIndex + 1, "snapshot and log hole: firstLogIndex:%s lastIndex+1:%s", firstLog.getIndex(), lastIndex + 1);
+            checkState(firstLog.getIndex() <= last.getIndex() + 1, "snapshot and log hole: firstLogIndex:%s lastIndex+1:%s", firstLog.getIndex(), last.getIndex() + 1);
             // check that the relationship between the first and last log indices is OK
             checkState(firstLog.getIndex() <= lastLog.getIndex(), "first and last log flip: firstLog:%s lastLog:%s", firstLog.getIndex(), lastLog.getIndex()); // equals for the case where log has only one entry
             // check that our log is not smaller than a snapshot (if one exists)
-            checkState(lastLog.getIndex() >= lastIndex, "lastIndex shrinking: lastLog:%s lastIndex:%s", lastLog, lastIndex);
+            checkState(lastLog.getIndex() >= last.getIndex(), "lastIndex shrinking: lastLog:%s lastIndex:%s", lastLog, last.getIndex());
             // set the last term/index values
-            lastTerm = lastLog.getTerm();
-            lastIndex = lastLog.getIndex();
+            last = new LogicalTimestamp(lastLog.getTerm(), lastLog.getIndex());
         }
 
         // finally, check that the log as a whole satisfies these properties
-        checkState(lastTerm <= currentTerm, "lastTerm:%s currentTerm:%s", lastTerm, currentTerm);
-        checkState(commitIndex <= lastIndex, "commitIndex:%s lastIndex:%s", commitIndex, lastIndex);
+        checkState(last.getTerm() <= currentTerm, "lastTerm:%s currentTerm:%s", last.getTerm(), currentTerm);
+        checkState(commitIndex <= last.getIndex(), "commitIndex:%s lastIndex:%s", commitIndex, last.getIndex());
     }
 
     //----------------------------------------------------------------------------------------------------------------//
@@ -1984,6 +1995,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     // submit a command
     //
 
+    // FIXME (AG): don't serialize all the entries when submitCommand called. only do so if they're caught up
     @Override
     public synchronized ListenableFuture<Void> submitCommand(Command command) throws NotLeaderException {
         LOGGER.trace("{}: submit command {}", self, command);
@@ -2016,11 +2028,12 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     }
 
     private void addClientEntry(long currentTerm, Command command, SettableFuture<Void> commandFuture) throws StorageException {
-        LogEntry lastLog = checkNotNull(log.getLast());
+        LogicalTimestamp last = getLast();
 
         // TODO (AG): add an appendLogEntry method to make this easier
-        long clientLogIndex = lastLog.getIndex() + 1;
+        long clientLogIndex = last.getIndex() + 1;
 
+        // FIXME (AG): have to check that I'm not overwriting a snapshot entry here
         LogEntry prevClientLog = log.get(clientLogIndex);
         checkState(prevClientLog == null, "overwrote %s at index %s in term %s", prevClientLog, clientLogIndex, currentTerm);
 
@@ -2036,17 +2049,19 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     private void sendAppendEntriesForClientEntry(Set<String> servers) throws StorageException {
         long currentTerm = store.getCurrentTerm();
         long commitIndex = store.getCommitIndex();
-        LogEntry lastLog = checkNotNull(log.getLast());
+        LogicalTimestamp last = getLast();
 
         for (String server : servers) {
             ServerDatum serverDatum = serverData.get(server);
 
             long serverPrevLogIndex = serverDatum.nextIndex - 1;
-            long unreplicatedEntryCount = lastLog.getIndex() - serverPrevLogIndex;
+            long unreplicatedEntryCount = last.getIndex() - serverPrevLogIndex;
             List<LogEntry> entries = Lists.newArrayListWithCapacity((int) unreplicatedEntryCount);
 
-            for (long logIndex = serverDatum.nextIndex; logIndex <= lastLog.getIndex(); logIndex++) {
-                entries.add(log.get(logIndex));
+            // FIXME (AG): has to deal with snapshots
+            // FIXME (AG): consolidate this with the heartbeat code
+            for (long index = serverDatum.nextIndex; index <= last.getIndex(); index++) {
+                entries.add(log.get(index));
             }
 
             LogEntry serverPrevLog = checkNotNull(log.get(serverPrevLogIndex));
@@ -2057,6 +2072,10 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
                 LOGGER.warn("{}: fail send AppendEntries with {} entries cause:{}", server, getEntryCount(entries), e.getMessage());
             }
         }
+    }
+
+    private LogicalTimestamp getLast() throws StorageException {
+        return new LogicalTimestamp(log.getLast());
     }
 
     private int getEntryCount(@Nullable Collection<LogEntry> entries) {
@@ -2091,6 +2110,8 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
         long commitIndex = store.getCommitIndex();
         checkArgument(entry.getIndex() > commitIndex, "entry:%s commitIndex:%s", entry, commitIndex);
+
+        // FIXME (AG): has to deal with snapshots
 
         log.put(entry);
     }

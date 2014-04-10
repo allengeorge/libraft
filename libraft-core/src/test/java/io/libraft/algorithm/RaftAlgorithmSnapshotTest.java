@@ -1964,6 +1964,7 @@ public final class RaftAlgorithmSnapshotTest {
         assertThatLogCurrentTermAndCommitIndexHaveValues(entries, currentTerm, commitIndex);
     }
 
+    // WARNING: this test is brittle because it is dependent on how many calls to getLatestSnapshot are made within the snapshotWritten method!
     @Test
     public void shouldHandleRepeatedCallsToSnapshotWrittenWithTheSameLastAppliedIndexCorrectly() throws StorageException {
         // we have a log that contains entries from index 3 onwards
@@ -2000,8 +2001,14 @@ public final class RaftAlgorithmSnapshotTest {
         // on the first call we return the snapshot created as the result of the first call to "snapshotWritten"
         SnapshotsStore.ExtendedSnapshot storedSnapshot1 = new UnitTestSnapshot(1, 11L);
 
-        // have the snapshot store return the first snapshot, followed by the second, repeatedly
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot0).thenReturn(storedSnapshot1);
+        // the first call to snapshotWritten is the only one that modifies the snapshotStore
+        // so, for the first two calls to SnapshotStore.getLatestSnapshot() we have to return the _initial_ state
+        // i.e. as if the SnapshotStore only had storedSnapshot0
+        // the two calls the require the initial state are:
+        //   - RaftAlgorithm.getLatestSnapshot()
+        //   - RaftAlgorithm.snapshotWritten()  <--- the method under test
+        // once the snapshot is written we can repeatedly return the new snapshot
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot0).thenReturn(storedSnapshot0).thenReturn(storedSnapshot1);
 
         //
         // starting situation is as follows:
@@ -2077,6 +2084,7 @@ public final class RaftAlgorithmSnapshotTest {
         assertThatLogCurrentTermAndCommitIndexHaveValues(entries, currentTerm, commitIndex);
     }
 
+    // WARNING: this test is brittle because it is dependent on how many calls to getLatestSnapshot are made within the snapshotWritten method!
     @Test
     public void shouldHandleOutOfOrderCallsToSnapshotWrittenCorrectly() throws StorageException {
         // we have a log that contains entries from index 3 onwards
@@ -2113,8 +2121,14 @@ public final class RaftAlgorithmSnapshotTest {
         // on the first call we return the snapshot created as the result of the first call to "snapshotWritten"
         SnapshotsStore.ExtendedSnapshot storedSnapshot1 = new UnitTestSnapshot(1, 11L);
 
-        // have the snapshot store return the first snapshot, followed by the second, repeatedly
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot0).thenReturn(storedSnapshot1);
+        // the first call to snapshotWritten is the only one that modifies the snapshotStore
+        // so, for the first two calls to SnapshotStore.getLatestSnapshot() we have to return the _initial_ state
+        // i.e. as if the SnapshotStore only had storedSnapshot0
+        // the two calls the require the initial state are:
+        //   - RaftAlgorithm.getLatestSnapshot()
+        //   - RaftAlgorithm.snapshotWritten()  <--- the method under test
+        // once the snapshot is written we can repeatedly return the new snapshot
+        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot0).thenReturn(storedSnapshot0).thenReturn(storedSnapshot1);
 
         //
         // starting situation is as follows:

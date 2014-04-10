@@ -150,7 +150,7 @@ public final class RaftAlgorithmSetupTest {
 
         RaftAlgorithm algorithm = createValidRaftAlgorithmInstance();
 
-        expectedException.expect(IllegalArgumentException.class);
+        expectedException.expect(IllegalStateException.class);
         algorithm.initialize();
     }
 
@@ -188,7 +188,7 @@ public final class RaftAlgorithmSetupTest {
 
         RaftAlgorithm algorithm = createValidRaftAlgorithmInstance();
 
-        expectedException.expect(IllegalArgumentException.class);
+        expectedException.expect(IllegalStateException.class);
         algorithm.initialize();
     }
 
