@@ -1175,7 +1175,8 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         LogicalTimestamp last = getLast();
 
         checkState(leader == null, "leader:%s", leader);
-        checkState(checkNotNull(votedFor).equals(self), "currentTerm:%s votedFor:%s", currentTerm, votedFor);
+        checkState(votedFor != null);
+        checkState(votedFor.equals(self), "currentTerm:%s votedFor:%s", currentTerm, votedFor);
         checkState(last.getTerm() < currentTerm, "currentTerm:%s last:%s", currentTerm, last);
         checkState(commands.isEmpty(), "commands:%s", commands);
         checkState(role == Role.CANDIDATE, "invalid transition from %s -> %s", role, Role.LEADER);
@@ -1738,8 +1739,6 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     // client entry-point
     //
 
-    // FIXME (AG): It _may not_ be necessary to verify log state before every snapshot/getCommitted operation
-
     //----------------------------------------------------------------------------------------------------------------//
     //
     // snapshots
@@ -1779,7 +1778,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         checkState(minEntriesToSnapshot != RaftConstants.SNAPSHOTS_DISABLED, "snapshots disabled");
 
         long commitIndex = store.getCommitIndex();
-        long firstLogIndex = 0; // NOTE: we do not count the SENTINEL as an entry that can be committed FIXME (AG): is this valid?
+        long firstLogIndex = LogEntry.SENTINEL.getIndex(); // NOTE: we do not count the SENTINEL as an entry that can be committed
 
         ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
         if (latestSnapshot != null) {
@@ -2075,7 +2074,26 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     }
 
     private LogicalTimestamp getLast() throws StorageException {
-        return new LogicalTimestamp(log.getLast());
+        LogEntry lastLog = log.getLast();
+        ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
+
+        LogicalTimestamp last;
+
+        if (lastLog != null) {
+            if (latestSnapshot != null) {
+                checkState(lastLog.getTerm() >= latestSnapshot.getTerm(),
+                        "lastLogTerm:%s latestSnapshotTerm:%s", lastLog.getTerm(), latestSnapshot.getTerm());
+                checkState(lastLog.getIndex() >= latestSnapshot.getIndex(),
+                        "lastLogIndex:%s latestSnapshotIndex:%s", lastLog.getIndex(), latestSnapshot.getIndex());
+            }
+
+            last = new LogicalTimestamp(lastLog);
+        } else {
+            checkState(latestSnapshot != null);
+            last = new LogicalTimestamp(latestSnapshot.getTerm(), latestSnapshot.getIndex());
+        }
+
+        return last;
     }
 
     private int getEntryCount(@Nullable Collection<LogEntry> entries) {
