@@ -68,7 +68,7 @@ abstract class UnitTestLogEntries {
     //================================================================================================================//
 
     static void clearLog(Log log) throws StorageException {
-        log.truncate(0);
+        log.removeSuffix(0);
     }
 
     static void insertIntoLog(Log log, LogEntry... entries) throws StorageException {
@@ -108,12 +108,12 @@ abstract class UnitTestLogEntries {
 
         // all the entries in the log match those we're asked to compare against
         for(LogEntry entry : entries) {
-            assertThat(entry, equalTo(log.get(entryIndex++)));
+            assertThat(log.get(entryIndex++), equalTo(entry));
         }
 
         // the last entry in the log is the last one given to us
         // note that this will always be valid because we'll always have
         // at least one entry to compare in the foreach above
-        assertThat(log.getLast().getIndex() + 1, equalTo(entryIndex));
+        assertThat(checkNotNull(log.getLast()).getIndex() + 1, equalTo(entryIndex));
     }
 }

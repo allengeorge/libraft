@@ -29,7 +29,7 @@
 package io.libraft.agent.rpc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.libraft.agent.TestLoggingRule;
+import io.libraft.agent.LoggingRule;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
@@ -72,7 +72,7 @@ public final class IncomingHandshakeHandlerTest {
     public final ExpectedException expectedException = ExpectedException.none();
 
     @Rule
-    public final TestLoggingRule loggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Test
     public void shouldThrowExceptionIfBadHandshakeIsReceived() throws Exception {

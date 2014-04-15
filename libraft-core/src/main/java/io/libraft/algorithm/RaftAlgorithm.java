@@ -34,11 +34,12 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.google.common.io.ByteStreams;
+import com.google.common.io.Closeables;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import io.libraft.Command;
 import io.libraft.Committed;
-import io.libraft.CommittedCommand;
 import io.libraft.NotLeaderException;
 import io.libraft.Raft;
 import io.libraft.RaftListener;
@@ -48,7 +49,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -159,6 +164,11 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     // FIXME (AG): restructure threading to avoid deadlocks
     // FIXME (AG): what should I do if the snapshot doesn't actually exist? - I need to reset the log to zero so that we can reboot the system
 
+    // TODO (AG): make calling back listeners safer
+    // - do not hold lock while notifying listeners
+    // - call back on separate thread (maybe?) to better insulate this component from arbitrary errors in foreign code (but what about log, etc.)
+    // - make listener callbacks _last_, after modifying all state
+
     // TODO (AG): this has to be expanded to deal with non-voting members during reconfiguration
     // TODO (AG): put in a transition() method that enforces this state machine in one location
     /**
@@ -215,7 +225,6 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         LEADER,
     }
 
-    // TODO (AG): See if this same concept can be applied to the AppendEntries processing
     /**
      * Log replication status assigned to each follower
      * server by the leader.
@@ -257,14 +266,14 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
         /**
          * Indicates that the leader server has found
-         * a log prefix in common with the follower
-         * server, and is syncing log entries to the
-         * follower's log. Whether the follower server
+         * a prefix in common with the follower
+         * server, and is syncing its state to the
+         * follower. Whether the follower server
          * is fully in sync can be determined by comparing
          * its {@code nextIndex}, and the index
          * of the last log entry in the leader server's log.
          */
-        APPLYING
+        APPLYING,
     }
 
     private final class LogicalTimestamp {
@@ -276,16 +285,20 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             this(entry.getTerm(), entry.getIndex());
         }
 
+        private LogicalTimestamp(ExtendedSnapshot snapshot) {
+            this(snapshot.getTerm(), snapshot.getIndex());
+        }
+
         private LogicalTimestamp(long term, long index) {
             this.term = term;
             this.index = index;
         }
 
-        public long getTerm() {
+        private long getTerm() {
             return term;
         }
 
-        public long getIndex() {
+        private long getIndex() {
             return index;
         }
 
@@ -314,11 +327,199 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         }
     }
 
+    private final class IncomingSnapshot {
+
+        private final ExtendedSnapshotWriter snapshotWriter;
+
+        private int nextSeqnum = 0;
+        private boolean valid = true;
+
+        private IncomingSnapshot(ExtendedSnapshotWriter snapshotWriter) {
+            this.snapshotWriter = snapshotWriter;
+        }
+
+        private ExtendedSnapshotWriter getSnapshotWriter() {
+            return snapshotWriter;
+        }
+
+        private long getTerm() {
+            checkValid();
+            return snapshotWriter.getTerm();
+        }
+
+        private long getIndex() {
+            checkValid();
+            return snapshotWriter.getIndex();
+        }
+
+        private int getNextSeqnum() {
+            checkValid();
+            return nextSeqnum;
+        }
+
+        private void readChunk(long seqnum, InputStream chunkInputStream) throws StorageException {
+            checkValid();
+
+            checkArgument(seqnum == nextSeqnum, "seqnum:[exp:%s act:%s]", nextSeqnum, seqnum);
+
+            try {
+                try {
+                    ByteStreams.copy(chunkInputStream, snapshotWriter.getSnapshotOutputStream());
+                    nextSeqnum++;
+                } finally {
+                    Closeables.close(chunkInputStream, false);
+                }
+            } catch (IOException e) {
+                throw new StorageException(e);
+            }
+        }
+
+        private void closeSnapshotWriter() throws StorageException {
+            try {
+                Closeables.close(snapshotWriter.getSnapshotOutputStream(), false);
+            } catch (IOException e) {
+                throw new StorageException(e);
+            } finally {
+                valid = false;
+            }
+        }
+
+        private void checkValid() {
+            checkState(valid);
+        }
+
+        @Override
+        public boolean equals(@Nullable Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            IncomingSnapshot other = (IncomingSnapshot) o;
+
+            return snapshotWriter.equals(other.snapshotWriter) && nextSeqnum == other.nextSeqnum;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(snapshotWriter, nextSeqnum);
+        }
+
+        @Override
+        public String toString() {
+            return Objects
+                    .toStringHelper(this)
+                    .add("snapshotWriter", snapshotWriter)
+                    .add("nextSeqnum", nextSeqnum)
+                    .add("valid", valid)
+                    .toString();
+        }
+    }
+
+    private final class OutgoingSnapshot {
+
+        private final ExtendedSnapshot snapshot;
+
+        private int seqnum = -1;
+        private boolean valid = true;
+        private @Nullable byte[] currentChunk = null;
+
+        private OutgoingSnapshot(ExtendedSnapshot snapshot) {
+            this.snapshot = snapshot;
+        }
+
+        private long getTerm() {
+            checkValid();
+            return snapshot.getTerm();
+        }
+
+        private long getIndex() {
+            checkValid();
+            return snapshot.getIndex();
+        }
+
+        private int getSeqnum() {
+            checkValid();
+            return seqnum;
+        }
+
+        private @Nullable ByteArrayInputStream getChunk() {
+            checkValid();
+
+            if (currentChunk != null) {
+                return new ByteArrayInputStream(currentChunk);
+            } else {
+                return null;
+            }
+        }
+
+        private void nextChunk() throws StorageException {
+            checkValid();
+
+            try {
+                byte[] chunk = new byte[RaftConstants.MAX_CHUNK_SIZE];
+                int bytesRead = snapshot.getSnapshotInputStream().read(chunk);
+
+                checkState(bytesRead != 0);
+
+                if (bytesRead == -1) {
+                    currentChunk = null;
+                } else if (bytesRead == RaftConstants.MAX_CHUNK_SIZE) {
+                    currentChunk = chunk;
+                } else {
+                    currentChunk = Arrays.copyOf(chunk, bytesRead);
+                }
+
+                seqnum++;
+            } catch (IOException e) {
+                throw new StorageException(e);
+            }
+        }
+
+        private void closeSnapshot() throws StorageException {
+            try {
+                Closeables.close(snapshot.getSnapshotInputStream(), false);
+            } catch (IOException e) {
+                throw new StorageException(e);
+            } finally {
+                valid = false;
+            }
+        }
+
+        private void checkValid() {
+            checkState(valid);
+        }
+
+        @Override
+        public boolean equals(@Nullable Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            OutgoingSnapshot other = (OutgoingSnapshot) o;
+            return snapshot.equals(other.snapshot) && seqnum == other.seqnum && Arrays.equals(currentChunk, other.currentChunk);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(snapshot, seqnum, currentChunk);
+        }
+
+        @Override
+        public String toString() {
+            return Objects
+                    .toStringHelper(this)
+                    .add("snapshot", snapshot)
+                    .add("seqnum", seqnum)
+                    .add("valid", valid)
+                    .add("chunk", currentChunk == null ? "null" : currentChunk.length)
+                    .toString();
+        }
+    }
+
     // Holds information about each server in the Raft cluster.
     private final class ServerDatum {
 
         private long nextIndex;
         private Phase phase;
+        private @Nullable OutgoingSnapshot outgoingSnapshot;
 
         private ServerDatum(long nextIndex, Phase phase) {
             this.nextIndex = nextIndex;
@@ -331,13 +532,14 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             if (o == null || getClass() != o.getClass()) return false;
 
             ServerDatum other = (ServerDatum) o;
-
-            return nextIndex == other.nextIndex && phase == other.phase;
+            return nextIndex == other.nextIndex
+                    && phase == other.phase
+                    && (outgoingSnapshot != null ? outgoingSnapshot.equals(other.outgoingSnapshot) : other.outgoingSnapshot == null);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hashCode(nextIndex, phase);
+            return Objects.hashCode(nextIndex, phase, outgoingSnapshot);
         }
 
         @Override
@@ -346,6 +548,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
                     .toStringHelper(this)
                     .add("nextIndex", nextIndex)
                     .add("phase", phase)
+                    .add("outgoingSnapshot", outgoingSnapshot)
                     .toString();
         }
     }
@@ -385,112 +588,6 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         }
     }
 
-    // Represents a noop that has been committed to the Raft cluster.
-    private static final class ClusterCommittedNoop implements Committed {
-
-        private final long index;
-
-        /**
-         * Constructor.
-         *
-         * @param index index > 0 in the Raft log of the committed noop
-         */
-        ClusterCommittedNoop(long index) {
-            this.index = index;
-        }
-
-        @Override
-        public Type getType() {
-            return Type.SKIP;
-        }
-
-        @Override
-        public long getIndex() {
-            return index;
-        }
-
-        @Override
-        public boolean equals(@Nullable Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            ClusterCommittedCommand other = (ClusterCommittedCommand) o;
-            return index == other.index;
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hashCode(index);
-        }
-
-        @Override
-        public String toString() {
-            return Objects
-                    .toStringHelper(this)
-                    .add("index", index)
-                    .toString();
-        }
-    }
-
-    // Represents a command that has been committed to the Raft cluster.
-    private static final class ClusterCommittedCommand implements CommittedCommand {
-
-        private final long index;
-        private final Command command;
-
-        /**
-         * Constructor.
-         *
-         * @param index index > 0 in the Raft log of the committed {@code Command}
-         * @param command the committed {@code Command} instance
-         *
-         * @see Command
-         */
-        ClusterCommittedCommand(long index, Command command) {
-            this.index = index;
-            this.command = command;
-        }
-
-        @Override
-        public Type getType() {
-            return Type.COMMAND;
-        }
-
-        @Override
-        public long getIndex() {
-            return index;
-        }
-
-        @Override
-        public Command getCommand() {
-            return command;
-        }
-
-        @Override
-        public boolean equals(@Nullable Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            ClusterCommittedCommand other = (ClusterCommittedCommand) o;
-
-            return index == other.index && command.equals(other.command);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hashCode(index, command);
-        }
-
-        @Override
-        public String toString() {
-            return Objects
-                    .toStringHelper(this)
-                    .add("index", index)
-                    .add("command", command)
-                    .toString();
-        }
-    }
-
     // Implementation of TimeoutTask that crashes if the task throws an exception
     private abstract class AlgorithmTimeoutTask implements Timer.TimeoutTask {
 
@@ -526,14 +623,6 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         }
     }
 
-    // TODO (AG): when I incorporate configuration changes, modify all rpc methods to check if the message came from a server in the cluster
-    // TODO (AG): when I chunk outgoing entries in AppendEntries I should verify that the commitIndex never greater than min(commitIndex, sent logIndices)
-    //            i.e. commitIndex should be the min(commitIndex, serverData.nextIndex - 1 + entryCount)
-    // TODO (AG): make calling back listeners safer
-    //            - do not hold lock while notifying listeners
-    //            - call back on separate thread (maybe?) to better insulate this component from arbitrary errors in foreign code (but what about log, etc.)
-    //            - make listener callbacks _last_, after modifying all state
-
     // common to all roles
     private final Random random;
     private final Timer timer;
@@ -548,12 +637,16 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     private boolean initialized = false;
     private boolean running = false;
     private Role role = Role.FOLLOWER;
-    private Timer.TimeoutHandle electionTimeoutHandle = null;
-    private Timer.TimeoutHandle snapshotTimeoutHandle = null;
+    private @Nullable Timer.TimeoutHandle electionTimeoutHandle = null;
+    private @Nullable Timer.TimeoutHandle snapshotTimeoutHandle = null;
 
     // snapshots
-    private final int minEntriesToSnapshot;
+    private final int minEntriesPerSnapshot;
+    private final int numEntriesOverlapWithSnapshot;
     private final long snapshotCheckInterval;
+
+    // messages
+    private final int maxEntriesPerAppendEntries;
 
     // timeout values
     private final long rpcTimeout;
@@ -563,8 +656,9 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     private final TimeUnit timeoutTimeUnit;
 
     // used when you're a follower
-    private String leader = null;
-    private long nextToApplyLogIndex = -1;
+    private @Nullable String leader = null;
+    private long nextToApplyIndex = -1;
+    private @Nullable IncomingSnapshot incomingSnapshot = null;
 
     // used when you're either a candidate or a leader
     private int clusterQuorumSize = 0;
@@ -573,7 +667,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     private final Map<String, Boolean> votedServers = Maps.newHashMap();
 
     // used when you're a leader
-    private Timer.TimeoutHandle heartbeatTimeoutHandle = null;
+    private @Nullable Timer.TimeoutHandle heartbeatTimeoutHandle = null;
     private final Map<String, ServerDatum> serverData = Maps.newHashMap();
     private final Map<Long, CommandDatum> commands = Maps.newHashMap();
 
@@ -617,7 +711,9 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
              self,
              cluster,
              RaftConstants.SNAPSHOTS_DISABLED,
+             RaftConstants.UNLIMITED_OVERLAP,
              RaftConstants.SNAPSHOT_CHECK_INTERVAL,
+             RaftConstants.MAX_ENTRIES_PER_APPEND_ENTRIES,
              RaftConstants.RPC_TIMEOUT,
              RaftConstants.MIN_ELECTION_TIMEOUT,
              RaftConstants.ADDITIONAL_ELECTION_TIMEOUT_RANGE,
@@ -641,11 +737,14 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
      * @param self unique id of the local Raft server that instantiated this {@code RaftAlgorithm} instance
      * @param cluster immutable set of unique ids of all the Raft servers in the Raft cluster.
      *                {@code cluster} <strong>must</strong> include {@code self}
-     * @param minEntriesToSnapshot minimum number of {@link LogEntry} instances coalesced into
-     *                             a {@link io.libraft.Snapshot}
+     * @param minEntriesPerSnapshot minimum number of {@link LogEntry} instances coalesced into
+     *                              a {@link io.libraft.Snapshot}
+     * @param numEntriesOverlapWithSnapshot  number of log entries that overlap with the snapshot region
      * @param snapshotCheckInterval time interval after which to check if the {@link Log} has enough
      *                              {@link LogEntry} for it to be compacted and a {@link io.libraft.Snapshot}
      *                              to be created
+     * @param maxEntriesPerAppendEntries maximum number of log entry instances to be sent in a single outgoing
+     *                                   AppendEntries message
      * @param rpcTimeout time after which a Raft server expects a response (RequestVoteReply, AppendEntriesReply)
      *                   to its RPC request (RequestVote, AppendEntries)
      * @param minElectionTimeout minimum time after which a follower Raft server will initiate a new election
@@ -671,15 +770,18 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             RaftListener listener,
             String self,
             Set<String> cluster,
-            int minEntriesToSnapshot,
+            int minEntriesPerSnapshot,
+            int numEntriesOverlapWithSnapshot,
             long snapshotCheckInterval,
+            int maxEntriesPerAppendEntries,
             long rpcTimeout,
             long minElectionTimeout,
             long additionalElectionTimeoutRange,
             long heartbeatInterval,
             TimeUnit timeoutTimeUnit) {
         checkClusterParameters(self, cluster);
-        checkSnapshotParameters(minEntriesToSnapshot);
+        checkSnapshotParameters(minEntriesPerSnapshot, numEntriesOverlapWithSnapshot);
+        checkOtherParameters(maxEntriesPerAppendEntries);
         checkTimeoutParameters(rpcTimeout, minElectionTimeout, additionalElectionTimeoutRange, heartbeatInterval);
 
         // set the quorum size _before_ we remove our id from the list
@@ -700,8 +802,10 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         this.listener = listener;
         this.self = self;
         this.cluster = ImmutableSet.copyOf(others);
-        this.minEntriesToSnapshot = minEntriesToSnapshot;
+        this.minEntriesPerSnapshot = minEntriesPerSnapshot;
+        this.numEntriesOverlapWithSnapshot = numEntriesOverlapWithSnapshot;
         this.snapshotCheckInterval = snapshotCheckInterval;
+        this.maxEntriesPerAppendEntries = maxEntriesPerAppendEntries;
         this.rpcTimeout = rpcTimeout;
         this.minElectionTimeout = minElectionTimeout;
         this.additionalElectionTimeoutRange = additionalElectionTimeoutRange;
@@ -709,14 +813,25 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         this.timeoutTimeUnit = timeoutTimeUnit;
     }
 
+    // FIXME (AG): also allow unlimited!
+    private void checkOtherParameters(int maxEntriesPerAppendEntries) {
+//        checkArgument(maxEntriesPerAppendEntries == RaftConstants.UNLIMITED_ENTRIES_PER_APPEND_ENTRIES || maxEntriesPerAppendEntries > 0,
+//                "maximimum number of entries in an AppendEntries must be unlimited or > 0");
+
+        checkArgument(maxEntriesPerAppendEntries > 0);
+    }
+
     private void checkClusterParameters(String self, Set<String> cluster) {
         checkArgument(cluster.size() >= 3 && cluster.size() <= 7, "invalid cluster size:%s", cluster.size());
         checkArgument(cluster.contains(self), "missing self:%s in cluster:%s", self, cluster);
     }
 
-    private void checkSnapshotParameters(int minEntriesToSnapshot) {
-        checkArgument(minEntriesToSnapshot == RaftConstants.SNAPSHOTS_DISABLED || minEntriesToSnapshot > 0,
-                "snapshots should be disabled or the min entries to snapshot should be > 0 value:%s", minEntriesToSnapshot);
+    private void checkSnapshotParameters(int minEntriesPerSnapshot, int numEntriesOverlapWithSnapshot) {
+        checkArgument(minEntriesPerSnapshot == RaftConstants.SNAPSHOTS_DISABLED || minEntriesPerSnapshot > 0,
+                "snapshots should be disabled or the min entries to snapshot should be > 0 value:%s", minEntriesPerSnapshot);
+
+        checkArgument(numEntriesOverlapWithSnapshot == RaftConstants.UNLIMITED_OVERLAP || (numEntriesOverlapWithSnapshot >= 0 && numEntriesOverlapWithSnapshot <= minEntriesPerSnapshot),
+                "num entries to overlap should be unlimited or within 0 <= numEntriesOverlapWithSnapshot <= minEntriesPerSnapshot value:%s", numEntriesOverlapWithSnapshot);
     }
 
     private void checkTimeoutParameters(long rpcTimeout, long minElectionTimeout, long additionalElectionTimeoutRange, long heartbeatInterval) {
@@ -762,6 +877,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         checkState(!initialized, "cannot be initialized twice");
 
         setupPersistentState();
+        resetState();
 
         initialized = true;
     }
@@ -795,7 +911,6 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             return;
         }
 
-        resetState();
         scheduleNextElectionTimeout();
         scheduleNextSnapshotTimeout();
 
@@ -805,15 +920,17 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     private void setupPersistentState() throws StorageException {
         LogEntry firstLog = log.getFirst();
         ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
-        if (firstLog == null && latestSnapshot == null) { // first time starting up
+        if (firstLog == null && latestSnapshot == null) { // no state to be applied; reset everything
             store.setCurrentTerm(0);
             store.setCommitIndex(0);
 
-            log.truncate(0);
+            log.removeSuffix(0);
             log.put(LogEntry.SENTINEL);
 
             store.clearVotedFor();
             store.setVotedFor(0, null);
+
+            // FIXME (AG): should I add a snapshotsStore.clear()?
         } else { // do incredibly basic sanity checks (doesn't check if log in good state or if snapshot actually exists)
             // TODO (AG): I would like a method that would return the last votedFor to check if the term > currentTerm
             checkIndicesAndTerms();
@@ -887,16 +1004,30 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         LOGGER.warn("{}: algorithm has been stopped", self);
     }
 
-    private void resetState() {
+    private void resetState() throws StorageException {
         role = Role.FOLLOWER;
         electionTimeoutHandle = null;
         snapshotTimeoutHandle = null;
         leader = null;
-        nextToApplyLogIndex = -1;
+        nextToApplyIndex = -1;
+        closeAndClearIncomingSnapshot();
         votedServers.clear();
         heartbeatTimeoutHandle = null;
+        closeAndClearOutgoingSnapshots();
         serverData.clear();
         failAllOutstandingCommands();
+    }
+
+    private void closeAndClearIncomingSnapshot() throws StorageException{
+        if (incomingSnapshot == null) {
+            return;
+        }
+
+        try {
+            incomingSnapshot.closeSnapshotWriter();
+        } finally {
+            incomingSnapshot = null;
+        }
     }
 
     private void failAllOutstandingCommands() {
@@ -973,13 +1104,12 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     }
 
     // bail
-    // if there's something wrong with the
-    // persistence layer, I don't know, and don't want to know
-    // how to deal with it. the system should not attempt to continue
+    // if something goes wrong that we don't know how to
+    // deal with we shouldn't attempt to continue
     // because we have no idea exactly what happened and whether
     // it's recoverable or not
-    private void handleStorageException(StorageException e) {
-        throw new RaftError(e);
+    private void throwRaftError(Throwable cause) {
+        throw new RaftError(cause);
     }
 
     private void beginElection() throws StorageException {
@@ -1053,7 +1183,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     // into three with a common core (setFollowerState) and
     // two clearly-labelled entry points
 
-    private void becomeFollowerWithoutUpdatingCurrentTerm(long currentTerm, @Nullable String newLeader) {
+    private void becomeFollowerWithoutUpdatingCurrentTerm(long currentTerm, @Nullable String newLeader) throws StorageException {
         logRoleChange(currentTerm, role, Role.FOLLOWER);
 
         stopHeartbeatTimeout();
@@ -1093,17 +1223,38 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     }
 
     // DO NOT CALL THIS METHOD DIRECTLY!
-    private void setFollowerState(@Nullable String newLeader) {
+    private void setFollowerState(@Nullable String newLeader) throws StorageException {
         role = Role.FOLLOWER;
+
+        closeAndClearIncomingSnapshot();
+        closeAndClearOutgoingSnapshots();
 
         setLeader(newLeader);
 
-        nextToApplyLogIndex = -1;
+        nextToApplyIndex = -1;
         votedServers.clear();
         serverData.clear();
         failAllOutstandingCommands();
 
         scheduleNextElectionTimeout();
+    }
+
+    private void closeAndClearOutgoingSnapshots() throws StorageException {
+        for (Map.Entry<String, ServerDatum> entry: serverData.entrySet()) {
+            closeAndClearOutgoingSnapshot(entry.getValue());
+        }
+    }
+
+    private void closeAndClearOutgoingSnapshot(ServerDatum serverDatum) throws StorageException {
+        if (serverDatum.outgoingSnapshot == null) {
+            return;
+        }
+
+        try {
+            serverDatum.outgoingSnapshot.closeSnapshot();
+        } finally {
+            serverDatum.outgoingSnapshot = null;
+        }
     }
 
     private void setLeader(@Nullable String newLeader) {
@@ -1139,13 +1290,16 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
         stopHeartbeatTimeout();
 
+        closeAndClearIncomingSnapshot();
+        closeAndClearOutgoingSnapshots();
+
         store.setCurrentTerm(newCurrentTerm);
 
         role = Role.CANDIDATE;
 
         setLeader(null);
 
-        nextToApplyLogIndex = -1;
+        nextToApplyIndex = -1;
         serverData.clear();
 
         votedServers.clear();
@@ -1184,14 +1338,16 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         logRoleChange(currentTerm, role, Role.LEADER);
 
         stopElectionTimeout();
-
         stopHeartbeatTimeout();
+
+        closeAndClearIncomingSnapshot();
+        closeAndClearOutgoingSnapshots();
 
         role = Role.LEADER;
 
         setLeader(self);
 
-        nextToApplyLogIndex = -1;
+        nextToApplyIndex = -1;
         votedServers.clear();
 
         long lastIndex = last.getIndex();
@@ -1210,7 +1366,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         log.put(new LogEntry.NoopEntry(currentTerm, lastIndex + 1));
 
         // send out the first heartbeat
-        heartbeat(currentTerm);
+        handleHeartbeatTimeout(currentTerm);
     }
 
     private void logRoleChange(long currentTerm, Role oldRole, Role newRole) {
@@ -1219,65 +1375,8 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         }
     }
 
-    private void heartbeat(final long currentTerm) throws StorageException {
-        AlgorithmTimeoutTask heartbeatTimeoutTask = new AlgorithmTimeoutTask("heartbeat") {
-            @Override
-            protected void runSafely(Timer.TimeoutHandle timeoutHandle) throws Exception {
-                if (timeoutHandle != heartbeatTimeoutHandle) {
-                    LOGGER.warn("{}: heartbeat task cancelled for term:{}", self, currentTerm);
-                    return;
-                }
-
-                handleHeartbeatTimeout(currentTerm);
-            }
-        };
-
-        long commitIndex = store.getCommitIndex();
-        LogicalTimestamp last = getLast();
-
-        checkState(commitIndex <= last.getIndex());
-
-        long nextIndex;
-        long prevTerm;
-        long prevIndex;
-        Collection<LogEntry> entries;
-        for (String server : cluster) {
-            nextIndex = serverData.get(server).nextIndex;
-
-            if (nextIndex == (last.getIndex() + 1)) { // we believe their prefix matches (standard heartbeat)
-                prevTerm = last.getTerm();
-                prevIndex = last.getIndex();
-                entries = null;
-            } else { // prefix mismatch (they need to be caught up), or, we don't know yet
-                // FIXME (AG): have to deal with snapshots and phases
-                LogEntry prevLog = checkNotNull(log.get(nextIndex - 1));
-
-                prevTerm = prevLog.getTerm();
-                prevIndex = prevLog.getIndex();
-
-                long entryCount = last.getIndex() - prevIndex;
-
-                // NOTE: when sending entries, you never include the prevLog.
-                // This is because the entries being added come _after_ prevLog, and
-                // prevLog{Index,Term} are simply used as safety checks
-                entries = Lists.newArrayListWithCapacity((int) entryCount);
-                for (long logIndex = prevIndex + 1; logIndex <= prevIndex + entryCount; logIndex++) {
-                    entries.add(log.get(logIndex));
-                }
-            }
-
-            try {
-                sender.appendEntries(server, currentTerm, commitIndex, prevTerm, prevIndex, entries);
-            } catch (RPCException e) {
-                LOGGER.warn("{}: fail send heartbeat with {} entries to {} cause:{}", self, getEntryCount(entries), server, e.getMessage());
-            }
-        }
-
-        heartbeatTimeoutHandle = timer.newTimeout(heartbeatTimeoutTask, heartbeatInterval, timeoutTimeUnit);
-    }
-
     private void handleHeartbeatTimeout(long currentTerm) throws StorageException {
-        LOGGER.trace("{}: heartbeat task for term {}", self, currentTerm);
+        LOGGER.trace("{}: heartbeat for term {}", self, currentTerm);
 
         if (!running) {
             logNotRunning();
@@ -1292,7 +1391,124 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         checkState(role == Role.LEADER, "role:%s", role);
         checkState(self.equals(leader), "self:%s leader:%s", self, leader);
 
-        heartbeat(currentTerm);
+        syncServers(currentTerm);
+
+        scheduleNextHeartbeatTimeout(currentTerm);
+    }
+
+    private void scheduleNextHeartbeatTimeout(final long currentTerm) throws StorageException {
+        AlgorithmTimeoutTask heartbeatTimeoutTask = new AlgorithmTimeoutTask("heartbeat") {
+            @Override
+            protected void runSafely(Timer.TimeoutHandle timeoutHandle) throws Exception {
+                if (timeoutHandle != heartbeatTimeoutHandle) {
+                    LOGGER.warn("{}: heartbeat task cancelled for term:{}", self, currentTerm);
+                    return;
+                }
+
+                handleHeartbeatTimeout(currentTerm);
+            }
+        };
+
+        heartbeatTimeoutHandle = timer.newTimeout(heartbeatTimeoutTask, heartbeatInterval, timeoutTimeUnit);
+    }
+
+    private void syncServers(long currentTerm) throws StorageException {
+        long commitIndex = store.getCommitIndex();
+        LogicalTimestamp last = getLast();
+
+        checkState(commitIndex <= last.getIndex());
+
+        for (String server : cluster) {
+            ServerDatum serverDatum = checkNotNull(serverData.get(server));
+
+            long nextIndex = serverDatum.nextIndex;
+            checkState(nextIndex <= (last.getIndex() + 1), "nextIndex:%s lastIndex+1:%s", nextIndex, last.getIndex() + 1);
+
+            if (nextIndex == (last.getIndex() + 1)) { // standard heartbeat
+                sendAppendEntries(server, currentTerm, commitIndex, last.getTerm(), last.getIndex(), null);
+                continue;
+            }
+
+            checkState(nextIndex <= last.getIndex(), "nextIndex:%s lastIndex:%s", nextIndex, last.getIndex());
+
+            long prevLogIndex = nextIndex - 1;
+            checkState(prevLogIndex >= 0);
+
+            // FIXME (AG): I should also send entries when the snapshot and the log do not overlap and prevLogIndex is at the end of the snapshot
+            //
+            //                               +----------- PREV_LOG_INDEX
+            //                               |
+            //                               |   ----------------------------------------
+            //           .. EMPTY ..         |  | 07 | 08 | 09 | 10 | 11 | 12 | 13 | 14 | (LOG)
+            //                               V  ----------------------------------------
+            //  --------------------------------
+            // |       LAST APPLIED = 6        | (SNAPSHOT)
+            // --------------------------------
+
+            LogEntry prevLog = log.get(prevLogIndex);
+            if (prevLog != null) {
+                if (serverDatum.outgoingSnapshot != null) {
+                    closeAndClearOutgoingSnapshot(serverDatum);
+                }
+
+                sendEntries(server, currentTerm, commitIndex, last, prevLogIndex);
+            } else {
+                if (serverDatum.outgoingSnapshot == null) {
+                    ExtendedSnapshot snapshot = checkNotNull(snapshotsStore.getLatestSnapshot());
+                    serverDatum.outgoingSnapshot = new OutgoingSnapshot(snapshot);
+                    serverDatum.outgoingSnapshot.nextChunk();
+                }
+
+                checkState(serverDatum.outgoingSnapshot != null);
+
+                OutgoingSnapshot outgoingSnapshot = serverDatum.outgoingSnapshot;
+                sendSnapshotChunk(server, currentTerm, outgoingSnapshot.getTerm(), outgoingSnapshot.getIndex(), outgoingSnapshot.getSeqnum(), outgoingSnapshot.getChunk());
+            }
+        }
+    }
+
+    private void sendEntries(String server, long currentTerm, long commitIndex, LogicalTimestamp last, long prevLogIndex) throws StorageException {
+        LogicalTimestamp prev;
+
+        {
+            LogEntry prevLog = log.get(prevLogIndex);
+            if (prevLog != null) {
+                prev = new LogicalTimestamp(prevLog);
+            } else {
+                ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
+                checkState(latestSnapshot != null);
+                checkState(latestSnapshot.getIndex() == prevLogIndex, "server:%s snapshotIndex:%s prevLogIndex:%s", server, latestSnapshot.getIndex(), prevLogIndex);
+                prev = new LogicalTimestamp(latestSnapshot);
+            }
+        }
+
+        long unreplicatedEntryCount = last.getIndex() - prev.getIndex();
+        long entriesToSendCount = Math.min(unreplicatedEntryCount, maxEntriesPerAppendEntries);
+        long lastIndexToSend = prev.getIndex() + entriesToSendCount;
+        long commitIndexToSend = Math.min(commitIndex, lastIndexToSend);
+
+        List<LogEntry> entries = Lists.newArrayListWithCapacity((int) entriesToSendCount);
+        for (long index = prev.getIndex() + 1; index <= lastIndexToSend; index++) {
+            entries.add(checkNotNull(log.get(index)));
+        }
+
+        sendAppendEntries(server, currentTerm, commitIndexToSend, prev.getTerm(), prev.getIndex(), entries);
+    }
+
+    private void sendAppendEntries(String server, long term, long commitIndex, long prevLogTerm, long prevLogIndex, @Nullable List<LogEntry> entries) {
+        try {
+            sender.appendEntries(server, term, commitIndex, prevLogTerm, prevLogIndex, entries);
+        } catch (RPCException e) {
+            LOGGER.warn("{}: fail send append entries with {} entries to {} cause:{}", self, getEntryCount(entries), server, e.getMessage());
+        }
+    }
+
+    private void sendSnapshotChunk(String server, long term, long snapshotTerm, long snapshotIndex, int seqnum, @Nullable InputStream chunkInputStream) {
+        try {
+            sender.snapshotChunk(server, term, snapshotTerm, snapshotIndex, seqnum, chunkInputStream);
+        } catch (RPCException e) {
+            LOGGER.warn("{}: fail send snapshot chunk snapshotTerm:{} snapshotIndex:{} seqnum:{} to {} cause:{}", self, snapshotTerm, snapshotIndex, seqnum, server, e.getMessage());
+        }
     }
 
     //----------------------------------------------------------------------------------------------------------------//
@@ -1318,7 +1534,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
             if (term < currentTerm) {
                 LOGGER.trace("{}: RequestVote from {}: old term: term:{} currentTerm:{}", self, server, term, currentTerm);
-                sendRequestVoteReplyIgnoreRPCException(server, term, currentTerm, false);
+                sendRequestVoteReply(server, term, currentTerm, false);
                 return;
             }
 
@@ -1334,7 +1550,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
             String votedFor = store.getVotedFor(term);
             LogicalTimestamp selfLast = getLast();
-            int candidateLogDominates = doesLogDominate(lastLogTerm, lastLogIndex, selfLast.getTerm(), selfLast.getIndex());
+            int candidateLogDominates = compareLogicalTimestamps(lastLogTerm, lastLogIndex, selfLast.getTerm(), selfLast.getIndex());
             boolean voteGranted = false;
 
             // you can grant the vote if:
@@ -1348,19 +1564,18 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             // this prevents a latecomer with an identical log as yours from delaying an election result
 
             if (leader == null && ((votedFor == null && candidateLogDominates >= 0) || (self.equals(votedFor) && candidateLogDominates == 1))) {
-                // TODO (AG): it's not clear to me whether I should set votedFor before or after updateFollowerState
-                becomeFollowerWithoutUpdatingCurrentTerm(currentTerm, null); // don't set the leader
                 store.setVotedFor(term, server);
+                becomeFollowerWithoutUpdatingCurrentTerm(currentTerm, null); // don't set the leader
                 voteGranted = true;
             }
 
-            sendRequestVoteReplyIgnoreRPCException(server, currentTerm, currentTerm, voteGranted);
+            sendRequestVoteReply(server, currentTerm, currentTerm, voteGranted);
         } catch (StorageException e) {
-            handleStorageException(e);
+            throwRaftError(e);
         }
     }
 
-    private void sendRequestVoteReplyIgnoreRPCException(String server, long term, long currentTerm, boolean voteGranted) {
+    private void sendRequestVoteReply(String server, long term, long currentTerm, boolean voteGranted) {
         try {
             sender.requestVoteReply(server, currentTerm, voteGranted);
         } catch (RPCException e) {
@@ -1368,19 +1583,11 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         }
     }
 
-    private int doesLogDominate(long lastLogTerm0, long lastLogIndex0, long lastLogTerm1, long lastLogIndex1) {
-        if (lastLogTerm0 < lastLogTerm1) {
+    private static int compareLogicalTimestamps(long term0, long index0, long term1, long index1) {
+        if (term0 < term1) {
             return -1;
-        }
-
-        if (lastLogTerm0 > lastLogTerm1) {
-            return 1;
-        }
-
-        if (lastLogIndex0 < lastLogIndex1) {
-            return -1;
-        } else if (lastLogIndex0 == lastLogIndex1) {
-            return 0;
+        } else if (term0 == term1) {
+            return Long.compare(index0, index1);
         } else {
             return 1;
         }
@@ -1424,7 +1631,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
                 }
             }
         } catch (StorageException e) {
-            handleStorageException(e);
+            throwRaftError(e);
         }
     }
 
@@ -1496,7 +1703,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
                 }
 
                 LOGGER.trace("{}: AppendEntries from {}: term < currentTerm: term:{} currentTerm:{}", self, server, term, currentTerm);
-                sendAppendEntriesReplyIgnoreRPCException(server, currentTerm, prevLogIndex, entryCount, false);
+                sendAppendEntriesReply(server, currentTerm, prevLogIndex, entryCount, false);
                 return;
             }
 
@@ -1520,39 +1727,40 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
             scheduleNextElectionTimeout();
 
-            // FIXME (AG): do I have to consider snapshots?
-
-            LogEntry prevLog = log.get(prevLogIndex);
-            if (prefixMismatch(prevLog, prevLogTerm)) {
-                LOGGER.trace("{}: prefix mismatch at index:{} expected term:{} entry:{}", self, prevLogIndex, prevLogTerm, prevLog);
-                sendAppendEntriesReplyIgnoreRPCException(server, currentTerm, prevLogIndex, entryCount, false);
+            if (prefixMismatch(prevLogIndex, prevLogTerm)) {
+                LOGGER.trace("{}: prefix mismatch at index:{} expected term:{} entry:{}", self, prevLogIndex, prevLogTerm, log.get(prevLogIndex));
+                sendAppendEntriesReply(server, currentTerm, prevLogIndex, entryCount, false);
                 return;
             } else {
-                // reassigned to prevent IDEA warning in for... loop
-                // done here, because this is the earliest place we can
-                // say conclusively that prevLog is not null
-                prevLog = checkNotNull(prevLog);
-
-                if (nextToApplyLogIndex == -1) {
-                    nextToApplyLogIndex = Math.max(selfCommitIndex + 1, prevLogIndex + 1);
+                if (nextToApplyIndex == -1) {
+                    nextToApplyIndex = Math.max(selfCommitIndex + 1, prevLogIndex + 1);
                 }
             }
 
-            log.truncate(nextToApplyLogIndex);
+            if ((incomingSnapshot != null) && (nextToApplyIndex > incomingSnapshot.getIndex())) {
+                closeAndClearIncomingSnapshot();
+            }
 
+            ExtendedSnapshot snapshot = snapshotsStore.getLatestSnapshot();
+            if (snapshot != null) {
+                checkState(nextToApplyIndex > snapshot.getIndex(), "nextToApplyIndex:%s snapshotIndex:%s", nextToApplyIndex, snapshot.getIndex());
+            }
+
+            log.removeSuffix(nextToApplyIndex);
+
+            long expectedEntryIndex = prevLogIndex + 1;
             for (LogEntry entry : entries) {
-                entry = checkNotNull(entry);
-                checkArgument(entry.getIndex() == prevLog.getIndex() + 1, "entries has hole: entry:%s prevLog:%s", entry, prevLog);
+                checkArgument(entry.getIndex() == expectedEntryIndex, "entries has hole: entry:%s expectedEntryIndex:%s", entry, expectedEntryIndex);
 
-                prevLog = entry;
+                expectedEntryIndex++;
 
-                if (entry.getIndex() != nextToApplyLogIndex) {
+                if (entry.getIndex() != nextToApplyIndex) {
                     LogEntry skippedLog = log.get(entry.getIndex());
                     checkState(entry.equals(skippedLog), "mismatch at index:%s entry:%s logEntry:%s", entry.getIndex(), entry, skippedLog);
                 } else {
                     LOGGER.trace("{}: add entry:{}", self, entry);
                     log.put(entry);
-                    nextToApplyLogIndex = nextToApplyLogIndex + 1;
+                    nextToApplyIndex = nextToApplyIndex + 1;
                 }
             }
 
@@ -1563,10 +1771,10 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             // it's actually safe to send our reply before updating commitIndex
             // that's because the reply is only signals that our log matches. The
             // receiver has no expectations as to the health of our commitIndex
-            sendAppendEntriesReplyIgnoreRPCException(server, currentTerm, prevLogIndex, entryCount, true);
+            sendAppendEntriesReply(server, currentTerm, prevLogIndex, entryCount, true);
 
             long originalSelfCommitIndex = selfCommitIndex;
-            long possibleSelfCommitIndex = Math.min(nextToApplyLogIndex -1 , commitIndex);
+            long possibleSelfCommitIndex = Math.min(nextToApplyIndex -1 , commitIndex);
 
             if (possibleSelfCommitIndex > selfCommitIndex) {
                 store.setCommitIndex(possibleSelfCommitIndex);
@@ -1574,20 +1782,36 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
                 setCommandFuturesAndNotifyClient(originalSelfCommitIndex + 1, selfCommitIndex);
             }
         } catch (StorageException e) {
-            handleStorageException(e);
+            throwRaftError(e);
         }
     }
 
-    private void sendAppendEntriesReplyIgnoreRPCException(String server, long currentTerm, long prevLogIndex, long entryCount, boolean applied) {
+    private boolean prefixMismatch(long prefixIndex, long expectedPrefixTerm) throws StorageException {
+        LogEntry prevLog = log.get(prefixIndex);
+        ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
+
+        if (prevLog == null) {
+            if (latestSnapshot != null) {
+                if (prefixIndex < latestSnapshot.getIndex()) { // the snapshot only includes committed entries, so there is no mismatch
+                    return false;
+                } else if (prefixIndex == latestSnapshot.getIndex()) {
+                    checkState(latestSnapshot.getTerm() == expectedPrefixTerm, "snapshotTerm:%s expectedPrefixTerm:%s", latestSnapshot.getTerm(), expectedPrefixTerm);
+                    return false;
+                }
+            }
+
+            return true;
+        } else {
+            return prevLog.getTerm() != expectedPrefixTerm;
+        }
+    }
+
+    private void sendAppendEntriesReply(String server, long currentTerm, long prevLogIndex, long entryCount, boolean applied) {
         try {
             sender.appendEntriesReply(server, currentTerm, prevLogIndex, entryCount, applied);
         } catch (RPCException e) {
             LOGGER.warn("{}: fail send AppendEntriesReply to {} cause:{}", self, server, e.getMessage());
         }
-    }
-
-    private boolean prefixMismatch(@Nullable LogEntry prevLog, long expectedPrevLogTerm) {
-        return (prevLog == null) || (prevLog.getTerm() != expectedPrevLogTerm);
     }
 
     private void setCommandFuturesAndNotifyClient(long firstNewCommittedIndex, long lastNewCommittedIndex) throws StorageException {
@@ -1673,21 +1897,23 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
                         serverDatum.phase = Phase.APPLYING;
                     } else {
                         checkArgument(prevLogIndex > 0);
-                        serverDatum.nextIndex--; // TODO (AG): immediately send out AppendEntries
-                        return;
+                        serverDatum.nextIndex--;
+                        return; // TODO (AG): send out messages to catch up servers
                     }
                 } else {
-                    return; // ignore out-of-order reply
+                    return; // ignore out-of-order reply (and don't bother trying to catch them up)
                 }
             }
 
-            checkState(serverDatum.phase == Phase.APPLYING);
+            // only servers in the "APPLYING" state can
+            // affect what entries are marked as committed
+            checkState(serverDatum.phase == Phase.APPLYING, "server:%s phase:%s", server, serverDatum.phase);
             checkState(applied);
 
             long lastAppliedIndex = prevLogIndex + entryCount;
+            LogicalTimestamp last = getLast();
 
             // check that they aren't applying more entries than we know of
-            LogicalTimestamp last = getLast();
             checkArgument(lastAppliedIndex <= last.getIndex(), "lastAppliedIndex:%s last:%s", lastAppliedIndex, last);
 
             if (lastAppliedIndex >= serverDatum.nextIndex) {
@@ -1708,8 +1934,10 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
                     setCommandFuturesAndNotifyClient(originalCommitIndex + 1, possibleCommitIndex);
                 }
             }
+
+            // TODO (AG): catch up servers that have responded if we've got a while till the next heartbeat
         } catch (StorageException e) {
-            handleStorageException(e);
+            throwRaftError(e);
         }
     }
 
@@ -1736,17 +1964,291 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
     //----------------------------------------------------------------------------------------------------------------//
     //
-    // client entry-point
+    // SnapshotChunk
     //
+
+    @Override
+    public synchronized void onSnapshotChunk(String server, long term, long snapshotTerm, long snapshotIndex, int seqnum, @Nullable InputStream chunkInputStream) {
+        LOGGER.trace("{}: SnapshotChunk from {}: term:{} snapshotTerm:{} snapshotIndex:{} seqnum:{}", self, server, term, snapshotTerm, snapshotIndex, seqnum);
+
+        if (!running) {
+            logNotRunning();
+            return;
+        }
+
+        try {
+            checkArgument(term >= 1);
+            checkArgument(snapshotTerm >= 1);
+            checkArgument(snapshotIndex >= 1);
+            checkArgument(seqnum >= 0);
+
+            long currentTerm = store.getCurrentTerm();
+
+            if (term < currentTerm) {
+                LOGGER.warn("{}: SnapshotChunk from {}: ignore: term:{} currentTerm:{}", self, server, term, currentTerm);
+                sendSnapshotChunkReply(server, currentTerm, snapshotTerm, snapshotIndex, 0); // nextSeqnum ignored
+                return;
+            }
+
+            if (term > currentTerm) {
+                LOGGER.info("{}: SnapshotChunk from {}: become follower: term:{} currentTerm:{}", self, server, term, currentTerm);
+                becomeFollower(term, server);
+                currentTerm = term; // UPDATING currentTerm
+            }
+
+            checkState(term == currentTerm, "term:%s currentTerm:%s", term, currentTerm);
+
+            // this can happen if you've crashed and
+            // restarted within a term on restart you are
+            // in the FOLLOWER role, (because the election
+            // timeout hasn't triggered) yet you don't
+            // know who the current leader is yet or,
+            // your election timeout expires and you shift
+            // into the candidate role
+            if ((role == Role.FOLLOWER && leader == null) || (role == Role.CANDIDATE)) {
+                becomeFollowerWithoutUpdatingCurrentTerm(term, server);
+            }
+
+            checkState(role == Role.FOLLOWER, "role:%s", role);
+            checkState(server.equals(leader), "server:%s leader:%s", server, leader);
+
+            long commitIndex = store.getCommitIndex();
+
+            if (commitIndex >= snapshotIndex) {
+                // if our commitIndex is greater than the
+                // snapshot index that means that the leader
+                // should know that we've committed those entries,
+                // and so they know where our nextIndex is as
+                // a result this is a late packet, and we
+                // shouldn't have to send a response to them
+                LOGGER.warn("{}: SnapshotChunk from {}: late chunk: commitIndex:{} snapshotIndex:{}", self, server, commitIndex, snapshotIndex);
+                return;
+            }
+
+            checkState(commitIndex < snapshotIndex, "commitIndex:%s snapshotIndex:%s", commitIndex, snapshotIndex);
+
+            if (incomingSnapshot != null) {
+                int compared = compareLogicalTimestamps(snapshotTerm, snapshotIndex, incomingSnapshot.getTerm(), incomingSnapshot.getIndex());
+                if (compared < 0) { // packet from an older snapshot
+                    // we can safely ignore this packet and not respond
+                    // to the sender because they've already sent us a
+                    // packet from a newer snapshot as a result, they
+                    // don't actually need a hint from us to tell them
+                    // which packet to send next (they're not sending
+                    // packets from the older snapshot)
+                    LOGGER.warn("{}: SnapshotChunk from {}: late snapshot: snapshotTerm:{} snapshotIndex:{} incoming:[snapshotTerm:{} snapshotIndex:{}]", self, server, snapshotTerm, snapshotIndex, incomingSnapshot.getTerm(), incomingSnapshot.getIndex());
+                    return;
+                } else if (compared > 0) { // newer snapshot - remove the current one
+                    closeAndClearIncomingSnapshot();
+                }
+            }
+
+            if (incomingSnapshot == null) {
+                ExtendedSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
+                snapshotWriter.setTerm(snapshotTerm);
+                snapshotWriter.setIndex(snapshotIndex);
+
+                nextToApplyIndex = 0;
+                incomingSnapshot = new IncomingSnapshot(snapshotWriter);
+            }
+
+            checkState(incomingSnapshot != null);
+            checkState(
+                    compareLogicalTimestamps(snapshotTerm, snapshotIndex, incomingSnapshot.getTerm(), incomingSnapshot.getIndex()) == 0,
+                    "snapshotTerm:%s snapshotIndex:%s incoming:[snapshotTerm:%s snapshotIndex:%s]",
+                    snapshotTerm, snapshotIndex, incomingSnapshot.getTerm(), incomingSnapshot.getIndex());
+
+            // the election timeout is shifted for all incoming
+            // snapshot packets after this point. this includes
+            // messages that may be duplicates. this is because
+            // I have no clear way of figuring out which packets
+            // are duplicates and which aren't, so, for efficiency
+            // (and because I assume duplicates to be infrequent)
+            // I simply shift the election timeout on all packets
+            scheduleNextElectionTimeout();
+
+            int expectedSeqnum = incomingSnapshot.getNextSeqnum();
+
+            if (seqnum != expectedSeqnum) {
+                LOGGER.warn("{}: SnapshotChunk from {}: seqnum mismatch: seqnum:[act:{} exp:{}]", self, server, seqnum, expectedSeqnum);
+                sendSnapshotChunkReply(server, currentTerm, snapshotTerm, snapshotIndex, expectedSeqnum);
+                return;
+            }
+
+            checkState(seqnum == expectedSeqnum, "seqnum:%s expectedSeqnum:%s", seqnum, expectedSeqnum);
+
+            // the snapshot isn't complete
+            // read the chunk we received and
+            // wait for the next one
+            if (chunkInputStream != null) {
+                incomingSnapshot.readChunk(seqnum, chunkInputStream);
+                LOGGER.trace("{}: SnapshotChunk from {}: need more: snapshotTerm:{} snapshotIndex:{} nextSeqnum:{}", self, server, snapshotTerm, snapshotIndex, incomingSnapshot.getNextSeqnum());
+                return;
+            }
+
+            LOGGER.trace("{}: SnapshotChunk from {}: apply snapshot", self, server);
+
+            // after this point the snapshot is complete
+            // and we're simply trying to apply it to our internal state
+
+            checkState(chunkInputStream == null);
+
+            // start by truncating everything after the commitIndex.
+            // this way, even if applying the snapshot fails we'll still
+            // have the committed entries sitting around
+            log.removeSuffix(commitIndex + 1);
+
+            // TODO (AG): consider failure mitigation strategies
+
+            // --- BEGIN UNSAFE AREA
+
+            // this section is unsafe because of the startup consistency checks
+            //
+            // if the server crashes:
+            // 1. _between_ the time the snapshot is stored and the commit index set
+            // 2. _because_ the snapshot is corrupted (i.e. it is stored successfully but is corrupt)
+            //
+            // then the system will not come up without manual intervention (i.e. removing the last snapshot)
+
+            // store snapshot
+            incomingSnapshot.closeSnapshotWriter();
+            snapshotsStore.storeSnapshot(incomingSnapshot.getSnapshotWriter());
+            incomingSnapshot = null;
+
+            // this is also dangerous, since, what happens if the
+            // snapshot is broken and the listener can't apply it?
+            listener.applyCommitted(snapshotsStore.getLatestSnapshot());
+
+            // this is also broken because this may fail causing
+            // the snapshot to be larger than the log
+            log.removeSuffix(0);
+
+            // update our commit index
+            store.setCommitIndex(snapshotIndex);
+
+            // finally, we update the next point at which we expect entries
+            nextToApplyIndex = snapshotIndex + 1;
+
+            // --- END UNSAFE AREA
+
+            sendSnapshotChunkReply(server, currentTerm, snapshotTerm, snapshotIndex, expectedSeqnum + 1); // one after the end
+        } catch (StorageException e) {
+            throwRaftError(e);
+        }
+    }
+
+    private void sendSnapshotChunkReply(String server, long term, long snapshotTerm, long snapshotIndex, int nextSeqnum) {
+        try {
+            sender.snapshotChunkReply(server, term, snapshotTerm, snapshotIndex, nextSeqnum);
+        } catch (RPCException e) {
+            LOGGER.warn("{}: fail send snapshot chunk reply snapshot:[term:{} index:{}] to {} cause:{}", self, snapshotTerm, snapshotIndex, server, e.getMessage());
+        }
+    }
 
     //----------------------------------------------------------------------------------------------------------------//
     //
-    // snapshots
+    // SnapshotChunkReply
     //
 
+    @Override
+    public synchronized void onSnapshotChunkReply(String server, long term, long snapshotTerm, long snapshotIndex, int nextSeqnum) {
+        LOGGER.trace("{}: SnapshotChunkReply from {}: term:{} snapshotTerm:{} snapshotIndex:{} nextSeqnum:{}", self, server, term, snapshotTerm, snapshotIndex, nextSeqnum);
+
+        if (!running) {
+            logNotRunning();
+            return;
+        }
+
+        try {
+            checkArgument(term >= 0);
+            checkArgument(snapshotTerm >= 0);
+            checkArgument(snapshotIndex >= 0);
+            checkArgument(nextSeqnum >= 0);
+
+            long currentTerm = store.getCurrentTerm();
+
+            if (currentTerm < term) {
+                LOGGER.warn("{}: SnapshotChunkReply from {}: become follower: term:{} currentTerm:{}", self, server, term, currentTerm);
+                becomeFollower(term, null);
+                return;
+            }
+
+            if (currentTerm > term) {
+                LOGGER.warn("{}: SnapshotChunkReply from {}: ignore: term:{} currentTerm:{}", self, server, term, currentTerm);
+                return;
+            }
+
+            checkState(currentTerm == term, "currentTerm:%s term:%s", currentTerm, term);
+
+            if (role != Role.LEADER) {
+                LOGGER.warn("{}: SnapshotChunkReply from {}: ignore: current role:{}", self, server, role);
+                return;
+            }
+
+            checkState(role == Role.LEADER, "role:%s", role);
+            checkState(self.equals(leader), "leader:%s", leader);
+
+            ServerDatum serverDatum = serverData.get(server);
+            serverDatum = checkNotNull(serverDatum);
+
+            OutgoingSnapshot snapshot = serverDatum.outgoingSnapshot;
+
+            if (snapshot == null) {
+                LOGGER.trace("{}: SnapshotChunkReply from {}: late reply", self, server);
+                return;
+            }
+
+            checkState(snapshot != null);
+
+            int order = compareLogicalTimestamps(snapshotTerm, snapshotIndex, snapshot.getTerm(), snapshot.getIndex());
+            checkState(order <= 0, "snapshotTerm:%s snapshotIndex:%s outgoing:[snapshotTerm:%s snapshotIndex:%s]", snapshotTerm, snapshotIndex, snapshot.getTerm(), snapshot.getIndex());
+
+            if (nextSeqnum < snapshot.getSeqnum()) {
+                LOGGER.warn("{}: SnapshotChunkReply from {}: late reply: nextSeqnum:{} snapshotSeqnum:{}", nextSeqnum, snapshot.getSeqnum());
+                return;
+            }
+
+            if (nextSeqnum == snapshot.getSeqnum() + 1) {
+                if (snapshot.getChunk() == null) {
+                    serverDatum.nextIndex = serverDatum.outgoingSnapshot.getIndex() + 1;
+                    serverDatum.phase = Phase.APPLYING;
+                    closeAndClearOutgoingSnapshot(serverDatum);
+                    return;
+                } else {
+                    snapshot.nextChunk();
+                }
+            }
+
+            checkState(serverDatum.outgoingSnapshot != null);
+            checkArgument(nextSeqnum == snapshot.getSeqnum(), "nextSeqnum:%s snapshotSeqnum:%s", nextSeqnum, snapshot.getSeqnum());
+
+            sendSnapshotChunk(server, currentTerm, snapshotTerm, snapshotIndex, nextSeqnum, snapshot.getChunk());
+        } catch (StorageException e) {
+            throwRaftError(e);
+        }
+    }
+
+    //----------------------------------------------------------------------------------------------------------------//
+    //
+    // take snapshot checks
+    //
+
+    // protocols must be structured so that the initiator has a way to maintain progress
+    // if you have an asynchronous network this is crucial - you have no idea what made it there or not
+    // so every message counts. you need to know, as the message initiator, what to do
+    // that's why nextExpectedSeqnum is so crucial - it tells you (as the initiator) what to do next
+    // pipelining is built into protocols
+    // want to separate timeout operation from rescheduling
+    // can't have unmissable protocol message in an asynchronous network - if that message is lost then sender and receiver are out of sync wrt states
+    // timer has to be stopped _last_
+
+    public synchronized void doSnapshotCheck() throws StorageException {
+        handleSnapshotTimeout();
+    }
+
     private void scheduleNextSnapshotTimeout() {
-        if (minEntriesToSnapshot == RaftConstants.SNAPSHOTS_DISABLED) {
-            LOGGER.trace("{}: snapshots disabled - skip schedule");
+        if (minEntriesPerSnapshot == RaftConstants.SNAPSHOTS_DISABLED) {
+            LOGGER.trace("{}: snapshots disabled - skip schedule", self);
             return;
         }
 
@@ -1755,12 +2257,20 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         AlgorithmTimeoutTask snapshotTimeoutTask = new AlgorithmTimeoutTask("snapshot timeout task") {
             @Override
             protected void runSafely(Timer.TimeoutHandle timeoutHandle) throws Exception {
+                LOGGER.info("{}: handle snapshot timeout", self);
+
+                if (!running) {
+                    logNotRunning();
+                    return;
+                }
+
                 if (timeoutHandle != snapshotTimeoutHandle) {
-                    LOGGER.warn("{}: snapshot timeout task cancelled");
+                    LOGGER.warn("{}: snapshot timeout task cancelled", self);
                     return;
                 }
 
                 handleSnapshotTimeout();
+                scheduleNextSnapshotTimeout();
             }
         };
 
@@ -1768,14 +2278,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     }
 
     private void handleSnapshotTimeout() throws StorageException {
-        LOGGER.info("{}: handle snapshot timeout", self);
-
-        if (!running) {
-            logNotRunning();
-            return;
-        }
-
-        checkState(minEntriesToSnapshot != RaftConstants.SNAPSHOTS_DISABLED, "snapshots disabled");
+        checkState(minEntriesPerSnapshot != RaftConstants.SNAPSHOTS_DISABLED, "snapshots disabled");
 
         long commitIndex = store.getCommitIndex();
         long firstLogIndex = LogEntry.SENTINEL.getIndex(); // NOTE: we do not count the SENTINEL as an entry that can be committed
@@ -1786,14 +2289,17 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         }
 
         // NOTE: the listener may not have applied all the committed entries - we'll check this when they submit their snapshot
-        if ((commitIndex - firstLogIndex) >= minEntriesToSnapshot) {
+        if ((commitIndex - firstLogIndex) >= minEntriesPerSnapshot) {
             SnapshotsStore.ExtendedSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
             snapshotWriter.setIndex(RaftConstants.INITIAL_SNAPSHOT_WRITER_LOG_INDEX);
             listener.writeSnapshot(snapshotWriter);
         }
-
-        scheduleNextSnapshotTimeout();
     }
+
+    //----------------------------------------------------------------------------------------------------------------//
+    //
+    // client entry-point
+    //
 
     @Override
     public synchronized void snapshotWritten(SnapshotWriter snapshotWriter) {
@@ -1805,53 +2311,64 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             checkArgument(snapshotWriter instanceof ExtendedSnapshotWriter, "unknown SnapshotWriter type:%s", snapshotWriter.getClass().getSimpleName());
             ExtendedSnapshotWriter extendedSnapshotWriter = (ExtendedSnapshotWriter) snapshotWriter;
 
-            // check that they actually attempted to set the last applied index
-            long lastAppliedIndex = extendedSnapshotWriter.getIndex();
-            checkArgument(lastAppliedIndex >= LogEntry.SENTINEL.getIndex(), "lastAppliedIndex:%s", lastAppliedIndex);
+            // by default we set the index to an invalid value
+            // check that the caller set it to a valid one
+            long snapshotIndex = extendedSnapshotWriter.getIndex();
+            checkArgument(snapshotIndex >= LogEntry.SENTINEL.getIndex(), "index:%s", snapshotIndex);
 
-            if (lastAppliedIndex == LogEntry.SENTINEL.getIndex()) {
+            if (snapshotIndex == LogEntry.SENTINEL.getIndex()) {
                 LOGGER.trace("{}: noop snapshot for {}", self, snapshotWriter);
                 return;
             }
 
-            // after this point we're working on a snapshot that actually has committed state
-            checkArgument(lastAppliedIndex > 0, "lastAppliedIndex:%s", lastAppliedIndex);
+            // after this point we're working on a snapshot
+            // that potentially includes committed log entries
 
-            // check that the underlying system is in a good state
+            checkArgument(snapshotIndex > 0, "index:%s", snapshotIndex);
             checkIndicesAndTerms();
 
-            // check that they haven't claimed to apply more entries than committed
+            // the caller should not have snapshotted
+            // more entries than were committed
             long commitIndex = store.getCommitIndex();
-            checkArgument(lastAppliedIndex <= commitIndex, "lastAppliedIndex:%s commitIndex:%s", lastAppliedIndex, commitIndex); // this check must come after checking the snapshot, log and commit indices
+            checkArgument(snapshotIndex <= commitIndex, "index:%s commitIndex:%s", snapshotIndex, commitIndex);
 
-            // this check allows us to avoid the situation where we
-            // generate snapshots that don't actually have an impact on log length
+            // check that this snapshot will actually reduce the log length
             ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
-            long numEntriesInSnapshot;
+            long snapshotEntryCount;
+
             if (latestSnapshot != null) {
-                numEntriesInSnapshot = lastAppliedIndex - latestSnapshot.getIndex(); // check how many entries _from the end of the snapshot_ onwards are in this snapshot
+                // calculate the number of entries:
+                // - FROM the _end of the previous snapshot_
+                // - TO   the _end of the caller-supplied snapshot_
+                snapshotEntryCount = snapshotIndex - latestSnapshot.getIndex();
             } else {
-                numEntriesInSnapshot = lastAppliedIndex; // we have a log _only_, so lastAppliedIndex - 0
+                // we have a log _only_, so index - 0
+                snapshotEntryCount = snapshotIndex;
             }
 
-            if (numEntriesInSnapshot < minEntriesToSnapshot) {
-                LOGGER.warn("{}: ignoring snapshot extendedSnapshotWriter - insufficient snapshot entries:{} minEntriesToSnapshot:{}", self, numEntriesInSnapshot, minEntriesToSnapshot);
+            if (snapshotEntryCount < minEntriesPerSnapshot) {
+                LOGGER.warn("{}: insufficient snapshot entries:{} minEntriesPerSnapshot:{}", self, snapshotEntryCount, minEntriesPerSnapshot);
                 return;
             }
 
             // set the term for the last entry in the snapshot
-            LogEntry lastAppliedLog = checkNotNull(log.get(lastAppliedIndex));
-            long lastAppliedTerm = lastAppliedLog.getTerm();
-            extendedSnapshotWriter.setTerm(lastAppliedTerm);
+            LogEntry snapshotLog = checkNotNull(log.get(snapshotIndex));
+            long snapshotTerm = snapshotLog.getTerm();
+            extendedSnapshotWriter.setTerm(snapshotTerm);
 
-            // attempt to store the snapshot on disk and truncate the log
+            // store the snapshot
             snapshotsStore.storeSnapshot(extendedSnapshotWriter);
-            // TODO (AG): truncate the log!
 
-            // recheck that we left the system in a good state
+            // truncate the log
+            if (numEntriesOverlapWithSnapshot != RaftConstants.UNLIMITED_OVERLAP) {
+                long lastRemovedIndex = snapshotIndex - numEntriesOverlapWithSnapshot;
+                checkState(lastRemovedIndex >= 0, "lastRemovedIndex:%s", lastRemovedIndex);
+                log.removePrefix(lastRemovedIndex);
+            }
+
             checkIndicesAndTerms();
         } catch (StorageException e) {
-            handleStorageException(e);
+            throwRaftError(e);
         }
     }
 
@@ -1875,8 +2392,6 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             if (indexToSearchFrom == commitIndex) {
                 return null;
             }
-
-            // TODO (AG): I'm pretty sure at some point I'm going to have to share this code with the algorithm methods
 
             //
             // OK...note that the log and the snapshot may overlap as follows
@@ -1923,13 +2438,12 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             // return whatever we have (this may be null!)
             return committed;
         } catch (StorageException e) {
-            handleStorageException(e);
-            throw new RaftError("handleStorageException did not throw", e); // should not ever get here
+            throwRaftError(e);
+            throw new RaftError("throwRaftError did not throw", e); // should not ever get here
         }
     }
 
     private void checkIndicesAndTerms() throws StorageException {
-        // variable definitions
         long currentTerm = store.getCurrentTerm();
 
         LogEntry firstLog = log.getFirst();
@@ -1937,11 +2451,6 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         ExtendedSnapshot latestSnapshot = snapshotsStore.getLatestSnapshot();
 
         long commitIndex = store.getCommitIndex();
-
-        // actual checks
-        //
-        // NOTE: separate these two so that I can refactor the block below
-        // into a separate static method for testing directly if I want to
 
         checkState((firstLog == null && lastLog == null) || (firstLog != null && lastLog != null), "firstLog:%s lastLog:%s", firstLog, lastLog);
         checkState(currentTerm >= LogEntry.SENTINEL.getTerm(), "currentTerm:%s", currentTerm);
@@ -1954,7 +2463,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
 
         // start off with the snapshot
         if (latestSnapshot != null) {
-            last = new LogicalTimestamp(latestSnapshot.getTerm(), latestSnapshot.getIndex());
+            last = new LogicalTimestamp(latestSnapshot);
         }
 
         // if a snapshot exists...
@@ -1981,7 +2490,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             // check that our log is not smaller than a snapshot (if one exists)
             checkState(lastLog.getIndex() >= last.getIndex(), "lastIndex shrinking: lastLog:%s lastIndex:%s", lastLog, last.getIndex());
             // set the last term/index values
-            last = new LogicalTimestamp(lastLog.getTerm(), lastLog.getIndex());
+            last = new LogicalTimestamp(lastLog);
         }
 
         // finally, check that the log as a whole satisfies these properties
@@ -1994,7 +2503,6 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     // submit a command
     //
 
-    // FIXME (AG): don't serialize all the entries when submitCommand called. only do so if they're caught up
     @Override
     public synchronized ListenableFuture<Void> submitCommand(Command command) throws NotLeaderException {
         LOGGER.trace("{}: submit command {}", self, command);
@@ -2018,7 +2526,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             throw e;
         } catch (StorageException e) {
             commandFuture.setException(e);
-            handleStorageException(e);
+            throwRaftError(e);
         } catch (Exception e) {
             commandFuture.setException(e);
         }
@@ -2029,10 +2537,8 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
     private void addClientEntry(long currentTerm, Command command, SettableFuture<Void> commandFuture) throws StorageException {
         LogicalTimestamp last = getLast();
 
-        // TODO (AG): add an appendLogEntry method to make this easier
         long clientLogIndex = last.getIndex() + 1;
 
-        // FIXME (AG): have to check that I'm not overwriting a snapshot entry here
         LogEntry prevClientLog = log.get(clientLogIndex);
         checkState(prevClientLog == null, "overwrote %s at index %s in term %s", prevClientLog, clientLogIndex, currentTerm);
 
@@ -2042,35 +2548,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
         CommandDatum prevCommandDatum = commands.put(clientLog.getIndex(), new CommandDatum(clientLog, commandFuture));
         checkState(prevCommandDatum == null, "overwrote client entry: index:%s", clientLog.getIndex());
 
-        sendAppendEntriesForClientEntry(cluster);
-    }
-
-    private void sendAppendEntriesForClientEntry(Set<String> servers) throws StorageException {
-        long currentTerm = store.getCurrentTerm();
-        long commitIndex = store.getCommitIndex();
-        LogicalTimestamp last = getLast();
-
-        for (String server : servers) {
-            ServerDatum serverDatum = serverData.get(server);
-
-            long serverPrevLogIndex = serverDatum.nextIndex - 1;
-            long unreplicatedEntryCount = last.getIndex() - serverPrevLogIndex;
-            List<LogEntry> entries = Lists.newArrayListWithCapacity((int) unreplicatedEntryCount);
-
-            // FIXME (AG): has to deal with snapshots
-            // FIXME (AG): consolidate this with the heartbeat code
-            for (long index = serverDatum.nextIndex; index <= last.getIndex(); index++) {
-                entries.add(log.get(index));
-            }
-
-            LogEntry serverPrevLog = checkNotNull(log.get(serverPrevLogIndex));
-
-            try {
-                sender.appendEntries(server, currentTerm, commitIndex, serverPrevLog.getTerm(), serverPrevLog.getIndex(), entries);
-            } catch (RPCException e) {
-                LOGGER.warn("{}: fail send AppendEntries with {} entries cause:{}", server, getEntryCount(entries), e.getMessage());
-            }
-        }
+        syncServers(currentTerm);
     }
 
     private LogicalTimestamp getLast() throws StorageException {
@@ -2090,7 +2568,7 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
             last = new LogicalTimestamp(lastLog);
         } else {
             checkState(latestSnapshot != null);
-            last = new LogicalTimestamp(latestSnapshot.getTerm(), latestSnapshot.getIndex());
+            last = new LogicalTimestamp(latestSnapshot);
         }
 
         return last;
@@ -2120,16 +2598,19 @@ public final class RaftAlgorithm implements RPCReceiver, Raft {
      * <p/>
      * <strong>Should</strong> only be called if no remote servers have
      * received information about the log entry (if any) at {@code entry.getIndex()}.
+     * Log entries can only be created <strong>after</strong> the end of
+     * a snapshot.
      *
      * @param entry {@link LogEntry} to be inserted into the {@code RaftAlgorithm} instance's log
+     * @throws IllegalArgumentException if the index of {@code entry} is less than the commit index
      */
     synchronized void addOrUpdateLogEntryWhileLeaderForUnitTestsOnly(LogEntry entry) throws StorageException {
         checkState(role == Role.LEADER, "role:%s", role);
 
-        long commitIndex = store.getCommitIndex();
-        checkArgument(entry.getIndex() > commitIndex, "entry:%s commitIndex:%s", entry, commitIndex);
-
-        // FIXME (AG): has to deal with snapshots
+        if (!entry.equals(LogEntry.SENTINEL)) {
+            long commitIndex = store.getCommitIndex();
+            checkArgument(entry.getIndex() > commitIndex, "entry:%s commitIndex:%s", entry, commitIndex);
+        }
 
         log.put(entry);
     }

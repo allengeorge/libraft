@@ -30,10 +30,14 @@ package io.libraft.kayvee.store;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.google.common.collect.Lists;
+import io.libraft.kayvee.LoggingRule;
 import io.libraft.kayvee.api.KeyValue;
 import org.hamcrest.Matchers;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.io.BufferedInputStream;
@@ -65,11 +69,17 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 public final class LocalStoreTest {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(LocalStoreTest.class);
+
     private static final String KEY = "leslie";
     private static final String EXPECTED_VALUE = "lamport@microsoft";
     private static final String NEW_VALUE = "lamport";
 
     private LocalStore localStore;
+
+    @Rule
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Before
     public void setup() {

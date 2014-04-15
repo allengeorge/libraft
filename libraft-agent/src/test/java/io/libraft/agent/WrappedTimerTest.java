@@ -51,7 +51,7 @@ public final class WrappedTimerTest {
     private WrappedTimer timer;
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Before
     public void setup() {

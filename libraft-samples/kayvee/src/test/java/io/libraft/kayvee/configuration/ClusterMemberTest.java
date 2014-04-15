@@ -28,7 +28,7 @@
 
 package io.libraft.kayvee.configuration;
 
-import io.libraft.kayvee.TestLoggingRule;
+import io.libraft.kayvee.LoggingRule;
 import org.hamcrest.Matchers;
 import org.junit.Rule;
 import org.junit.Test;
@@ -48,7 +48,7 @@ public final class ClusterMemberTest {
     public final ExpectedException expectedException = ExpectedException.none();
 
     @Rule
-    public final TestLoggingRule loggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Test
     public void shouldThrowIfKayVeeURLWithoutASchemeIsUsed() {

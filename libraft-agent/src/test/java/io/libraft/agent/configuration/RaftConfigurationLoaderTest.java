@@ -33,7 +33,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
 import com.google.common.io.Resources;
-import io.libraft.agent.TestLoggingRule;
+import io.libraft.agent.LoggingRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -54,7 +54,7 @@ public final class RaftConfigurationLoaderTest {
     public final ExpectedException expectedException = ExpectedException.none();
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Test
     public void shouldDeserializeConfiguration() throws IOException, RaftConfigurationException {

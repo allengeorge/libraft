@@ -108,13 +108,24 @@ class InMemoryLog implements Log {
     }
 
     @Override
-    public void truncate(long index) throws StorageException {
+    public void removeSuffix(long index) throws StorageException {
         if (index >= entries.size()) {
             return;
         }
 
         for (int i = entries.size() - 1; i >= (int) index; i--) {
             entries.remove(i);
+        }
+    }
+
+    @Override
+    public void removePrefix(long index) throws StorageException {
+        if (index > entries.size()) {
+            index = entries.size();
+        }
+
+        for (int i = (int) index; i >= 0; i--) {
+            entries.set(i, null);
         }
     }
 

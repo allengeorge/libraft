@@ -33,6 +33,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 
 import javax.annotation.Nullable;
+import java.io.InputStream;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
@@ -152,6 +153,61 @@ class StoringSender implements RPCSender {
         }
     }
 
+    static final class SnapshotChunk extends RPCCall {
+
+        final long snapshotTerm;
+        final long snapshotIndex;
+        final int seqnum;
+        final @Nullable InputStream chunkInputStream;
+
+        SnapshotChunk(String server, long term, long snapshotTerm, long snapshotIndex, int seqnum, @Nullable InputStream chunkInputStream) {
+            super(server, term);
+            this.snapshotTerm = snapshotTerm;
+            this.snapshotIndex = snapshotIndex;
+            this.seqnum = seqnum;
+            this.chunkInputStream = chunkInputStream;
+        }
+
+        @Override
+        public String toString() {
+            return Objects
+                    .toStringHelper(this)
+                    .add("server", server)
+                    .add("term", term)
+                    .add("snapshotTerm", snapshotTerm)
+                    .add("snapshotIndex", snapshotIndex)
+                    .add("seqnum", seqnum)
+                    .add("chunkInputStream", chunkInputStream)
+                    .toString();
+        }
+    }
+
+    static final class SnapshotChunkReply extends RPCCall {
+
+        final long snapshotTerm;
+        final long snapshotIndex;
+        final int nextSeqnum;
+
+        public SnapshotChunkReply(String server, long term, long snapshotTerm, long snapshotIndex, int nextSeqnum) {
+            super(server, term);
+            this.snapshotTerm = snapshotTerm;
+            this.snapshotIndex = snapshotIndex;
+            this.nextSeqnum = nextSeqnum;
+        }
+
+        @Override
+        public String toString() {
+            return Objects
+                    .toStringHelper(this)
+                    .add("server", server)
+                    .add("term", term)
+                    .add("snapshotTerm", snapshotTerm)
+                    .add("snapshotIndex", snapshotIndex)
+                    .add("nextSeqnum", nextSeqnum)
+                    .toString();
+        }
+    }
+
     //
     // rpc
     //
@@ -210,4 +266,15 @@ class StoringSender implements RPCSender {
     public void appendEntriesReply(String server, long term, long prevLogIndex, long entryCount, boolean applied) throws RPCException {
         rpcCalls.add(new AppendEntriesReply(server, term, prevLogIndex, entryCount, applied));
     }
+
+    @Override
+    public void snapshotChunk(String server, long term, long snapshotTerm, long snapshotIndex, int seqnum, @Nullable InputStream chunkInputStream) throws RPCException {
+        rpcCalls.add(new SnapshotChunk(server, term, snapshotTerm, snapshotIndex, seqnum, chunkInputStream));
+    }
+
+    @Override
+    public void snapshotChunkReply(String server, long term, long snapshotTerm, long snapshotIndex, int nextSeqnum) throws RPCException {
+        rpcCalls.add(new SnapshotChunkReply(server, term, snapshotTerm, snapshotIndex, nextSeqnum));
+    }
+
 }

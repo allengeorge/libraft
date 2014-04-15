@@ -170,7 +170,7 @@ public final class RaftAgentTest {
     private Random random;
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Rule
     public final Timeout timeout = new Timeout(10000); // 10 seconds

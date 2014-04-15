@@ -28,7 +28,7 @@
 
 package io.libraft.agent.persistence;
 
-import io.libraft.agent.TestLoggingRule;
+import io.libraft.agent.LoggingRule;
 import io.libraft.algorithm.StorageException;
 import org.junit.Before;
 import org.junit.Rule;
@@ -51,7 +51,7 @@ public final class JDBCStoreTest {
     private JDBCStore jdbcStore;
 
     @Rule
-    public TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Before
     public void setupDatabase() throws StorageException {

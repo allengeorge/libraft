@@ -29,7 +29,9 @@
 package io.libraft.algorithm;
 
 import com.google.common.base.Charsets;
+import com.google.common.base.Objects;
 
+import javax.annotation.Nullable;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -64,5 +66,19 @@ final class UnitTestSnapshot implements SnapshotsStore.ExtendedSnapshot {
     @Override
     public InputStream getSnapshotInputStream() throws IOException {
         return new ByteArrayInputStream(TEST_DATA.getBytes(Charsets.US_ASCII.name()));
+    }
+
+    @Override
+    public boolean equals(@Nullable Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        UnitTestSnapshot other = (UnitTestSnapshot) o;
+        return term == other.term && index == other.index;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(term, index);
     }
 }

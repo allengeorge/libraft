@@ -29,6 +29,7 @@
 package io.libraft.algorithm;
 
 import javax.annotation.Nullable;
+import java.io.InputStream;
 import java.util.Collection;
 
 /**
@@ -54,6 +55,8 @@ import java.util.Collection;
  * be halted.
  */
 public interface RPCReceiver {
+
+    // FIXME (AG): we will avoid wasted work in RaftAlgorithm if we have some notion of whether server is 'available' or not
 
     /**
      * Indicates that a RequestVote was received.
@@ -108,4 +111,8 @@ public interface RPCReceiver {
      *                to its log. false otherwise
      */
     void onAppendEntriesReply(String server, long term, long prevLogIndex, long entryCount, boolean applied);
+
+    void onSnapshotChunk(String server, long term, long snapshotTerm, long snapshotIndex, int seqnum, @Nullable InputStream chunkInputStream);
+
+    void onSnapshotChunkReply(String server, long term, long snapshotTerm, long snapshotIndex, int nextSeqnum);
 }

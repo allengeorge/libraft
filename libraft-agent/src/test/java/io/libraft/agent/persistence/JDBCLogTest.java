@@ -29,7 +29,7 @@
 package io.libraft.agent.persistence;
 
 import com.google.common.collect.Sets;
-import io.libraft.agent.TestLoggingRule;
+import io.libraft.agent.LoggingRule;
 import io.libraft.agent.UnitTestCommand;
 import io.libraft.agent.UnitTestCommandDeserializer;
 import io.libraft.agent.UnitTestCommandSerializer;
@@ -59,7 +59,7 @@ public final class JDBCLogTest {
     private JDBCLog jdbcLog;
 
     @Rule
-    public TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Before
     public void setup() throws StorageException {
@@ -190,7 +190,7 @@ public final class JDBCLogTest {
         jdbcLog.put(new LogEntry.NoopEntry(1, 8));
         jdbcLog.put(new LogEntry.NoopEntry(1, 9));
 
-        jdbcLog.truncate(7);
+        jdbcLog.removeSuffix(7);
 
         assertThat(jdbcLog.getLast(), Matchers.<LogEntry>equalTo(new LogEntry.NoopEntry(1, 3)));
     }
@@ -205,7 +205,7 @@ public final class JDBCLogTest {
         jdbcLog.put(new LogEntry.NoopEntry(1, 8));
         jdbcLog.put(new LogEntry.NoopEntry(1, 9));
 
-        jdbcLog.truncate(6); // notice how I specified an index that doesn't exist
+        jdbcLog.removeSuffix(6); // notice how I specified an index that doesn't exist
 
         assertThat(jdbcLog.getLast(), Matchers.<LogEntry>equalTo(new LogEntry.NoopEntry(1, 3)));
     }
@@ -220,8 +220,53 @@ public final class JDBCLogTest {
         jdbcLog.put(new LogEntry.NoopEntry(1, 8));
         jdbcLog.put(new LogEntry.NoopEntry(1, 9)); // <--- expect this to be the last entry after truncation
 
-        jdbcLog.truncate(11);
+        jdbcLog.removeSuffix(11);
 
         assertThat(jdbcLog.getLast(), Matchers.<LogEntry>equalTo(new LogEntry.NoopEntry(1, 9)));
+    }
+
+    @Test
+    public void shouldClearPrefixWhenIndexOfExistingEntryIsSpecified() throws StorageException {
+        jdbcLog.put(LogEntry.SENTINEL);
+        jdbcLog.put(new LogEntry.NoopEntry(1, 1));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 2));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 3));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 7));  // <--- expect this to be the last entry after prefix cleared
+        jdbcLog.put(new LogEntry.NoopEntry(1, 8));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 9));
+
+        jdbcLog.removePrefix(3); // notice that 3 is the index of an existing entry
+
+        assertThat(jdbcLog.getFirst(), Matchers.<LogEntry>equalTo(new LogEntry.NoopEntry(1, 7)));
+    }
+
+    @Test
+    public void shouldClearPrefixLogIfIndexNotEqualToExistingEntryIndexIsSpecified() throws StorageException {
+        jdbcLog.put(LogEntry.SENTINEL);
+        jdbcLog.put(new LogEntry.NoopEntry(1, 1));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 2));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 3));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 7));  // <--- expect this to be the last entry after truncation
+        jdbcLog.put(new LogEntry.NoopEntry(1, 8));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 9));
+
+        jdbcLog.removePrefix(6); // notice how I specified an index that doesn't exist
+
+        assertThat(jdbcLog.getFirst(), Matchers.<LogEntry>equalTo(new LogEntry.NoopEntry(1, 7)));
+    }
+
+    @Test
+    public void shouldClearLogIfClearPrefixIsCalledWithIndexGreaterThanLastLogEntry() throws StorageException {
+        jdbcLog.put(LogEntry.SENTINEL);
+        jdbcLog.put(new LogEntry.NoopEntry(1, 1));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 2));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 3));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 7));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 8));
+        jdbcLog.put(new LogEntry.NoopEntry(1, 9));
+
+        jdbcLog.removePrefix(11);
+
+        assertThat(jdbcLog.getLast(), nullValue());
     }
 }

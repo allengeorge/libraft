@@ -32,7 +32,7 @@ import com.google.common.base.Charsets;
 import com.google.common.collect.Sets;
 import com.google.common.io.Closeables;
 import io.libraft.Snapshot;
-import io.libraft.agent.TestLoggingRule;
+import io.libraft.agent.LoggingRule;
 import io.libraft.algorithm.StorageException;
 import org.apache.tomcat.jdbc.pool.DataSource;
 import org.hamcrest.Matchers;
@@ -159,7 +159,7 @@ public class OnDiskSnapshotsStoreTest {
     private OnDiskSnapshotsStore snapshotsStore; // SUT
 
     @Rule
-    public final TestLoggingRule loggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     private interface SnapshotStoreMethodCallable {
 

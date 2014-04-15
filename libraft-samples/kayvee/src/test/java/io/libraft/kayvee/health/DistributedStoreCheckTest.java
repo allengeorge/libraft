@@ -31,9 +31,13 @@ package io.libraft.kayvee.health;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.SettableFuture;
 import io.libraft.NotLeaderException;
+import io.libraft.kayvee.LoggingRule;
 import io.libraft.kayvee.store.DistributedStore;
 import org.hamcrest.Matchers;
+import org.junit.Rule;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -43,8 +47,13 @@ import static org.mockito.Mockito.when;
 
 public final class DistributedStoreCheckTest {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(DistributedStoreCheck.class);
+
     private final DistributedStore distributedStore = mock(DistributedStore.class);
     private final DistributedStoreCheck check = new DistributedStoreCheck(distributedStore);
+
+    @Rule
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Test
     public void shouldReturnOKResultIfServerIsLeader() {

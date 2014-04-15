@@ -67,12 +67,8 @@ final class SnapshotFileWriter implements SnapshotsStore.ExtendedSnapshotWriter 
         this.snapshotDirectory = snapshotDirectory;
     }
 
-    /**
-     * Set the term of the last committed log entry contained in the snapshot.
-     *
-     * @return term >= 0 in the Raft log of last committed log entry contained in the snapshot
-     */
-    long getTerm() {
+    @Override
+    public long getTerm() {
         return term;
     }
 

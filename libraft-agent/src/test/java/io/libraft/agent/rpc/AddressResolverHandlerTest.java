@@ -29,7 +29,7 @@
 package io.libraft.agent.rpc;
 
 import com.google.common.util.concurrent.MoreExecutors;
-import io.libraft.agent.TestLoggingRule;
+import io.libraft.agent.LoggingRule;
 import org.hamcrest.Matchers;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelFuture;
@@ -70,7 +70,7 @@ public final class AddressResolverHandlerTest {
     private final AddressResolverHandler handler = new AddressResolverHandler(MoreExecutors.listeningDecorator(MoreExecutors.sameThreadExecutor()));
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Before
     public void setup() {

@@ -26,17 +26,28 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package io.libraft.algorithm;
+package io.libraft.kayvee;
 
 import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
 import org.slf4j.Logger;
 
-public final class TestLoggingRule extends TestWatcher {
+// FIXME (AG): Remove this class and depend on io.libraft.algorithm.LoggingRule in libraft-core directly
+//
+// This copy was done because as of gradle 1.8, attempting to publish multiple
+// artifacts from a single sub-project fails with the error:
+// "Publishing is not yet able to resolve a dependency on a project with multiple different publications."
+// Since my testlib only contains one class, it's better to copy this class than create a completely
+// new sub-project to work around this issue.
+
+/**
+ * Logs when a test starts, and when it finishes.
+ */
+public final class LoggingRule extends TestWatcher {
 
     private final Logger logger;
 
-    public TestLoggingRule(Logger logger) {
+    public LoggingRule(Logger logger) {
         this.logger = logger;
     }
 

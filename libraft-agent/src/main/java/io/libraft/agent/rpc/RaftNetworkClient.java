@@ -58,6 +58,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.Collection;
@@ -463,5 +464,15 @@ public final class RaftNetworkClient implements RPCSender {
     @Override
     public void appendEntriesReply(String server, long term, long prevLogIndex, long entryCount, boolean applied) throws RPCException {
         write(server, new AppendEntriesReply(self.getId(), server, term, prevLogIndex, entryCount, applied));
+    }
+
+    @Override
+    public void snapshotChunk(String server, long term, long snapshotTerm, long snapshotIndex, int seqnum, InputStream chunkInputStream) throws RPCException {
+        // FIXME (AG): noop
+    }
+
+    @Override
+    public void snapshotChunkReply(String server, long term, long snapshotTerm, long snapshotIndex, int nextSeqnum) throws RPCException {
+        // FIXME (AG): noop
     }
 }

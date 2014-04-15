@@ -36,7 +36,7 @@ import com.yammer.dropwizard.config.ConfigurationException;
 import com.yammer.dropwizard.config.ConfigurationFactory;
 import com.yammer.dropwizard.validation.Validator;
 import io.libraft.kayvee.KayVeeConfigurationFixture;
-import io.libraft.kayvee.TestLoggingRule;
+import io.libraft.kayvee.LoggingRule;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -57,7 +57,7 @@ public final class KayVeeConfigurationTest {
     private static final ObjectWriter WRITER = new ObjectMapper().writerWithDefaultPrettyPrinter();
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Rule
     public final ExpectedException expectedException = ExpectedException.none();

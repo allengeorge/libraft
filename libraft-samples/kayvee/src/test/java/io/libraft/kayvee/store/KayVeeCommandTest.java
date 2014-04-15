@@ -35,7 +35,7 @@ import io.libraft.Command;
 import io.libraft.agent.protocol.AppendEntries;
 import io.libraft.agent.protocol.RaftRPC;
 import io.libraft.algorithm.LogEntry;
-import io.libraft.kayvee.TestLoggingRule;
+import io.libraft.kayvee.LoggingRule;
 import org.hamcrest.Matchers;
 import org.junit.Rule;
 import org.junit.Test;
@@ -58,7 +58,7 @@ public final class KayVeeCommandTest {
     private static final ObjectWriter WRITER = MAPPER.writerWithDefaultPrettyPrinter();
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Test
     public void shouldSerializeAndDeserializeKayVeeCommand() throws IOException {

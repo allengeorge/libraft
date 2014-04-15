@@ -32,8 +32,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.io.Resources;
+import io.libraft.agent.LoggingRule;
 import io.libraft.agent.RaftRPCFixture;
-import io.libraft.agent.TestLoggingRule;
 import io.libraft.agent.UnitTestCommandDeserializer;
 import io.libraft.agent.UnitTestCommandSerializer;
 import org.junit.BeforeClass;
@@ -56,7 +56,7 @@ public final class RaftRPCConversionTest {
     private static final UnitTestCommandDeserializer COMMAND_DESERIALIZER = new UnitTestCommandDeserializer();
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     private static <T extends RaftRPC> T fromJSONAsRaftRPC(String filename, Class<T> klass) throws IOException {
         return MAPPER.readValue(Resources.getResource(filename), klass);

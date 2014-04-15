@@ -30,7 +30,7 @@ package io.libraft.kayvee.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.io.Resources;
-import io.libraft.kayvee.TestLoggingRule;
+import io.libraft.kayvee.LoggingRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -73,7 +73,7 @@ public final class KayVeeSetValueConversionTest {
     private final boolean shouldHasNewValueBeenSet;
 
     @Rule
-    public final TestLoggingRule loggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     public KayVeeSetValueConversionTest(
             String resourceFilename,

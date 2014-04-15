@@ -274,7 +274,7 @@ public final class JDBCLog extends JDBCBase implements Log {
     }
 
     @Override
-    public synchronized void truncate(final long index) throws StorageException {
+    public synchronized void removeSuffix(final long index) throws StorageException {
         try {
             execute(new ConnectionBlock() {
                 @Override
@@ -290,6 +290,26 @@ public final class JDBCLog extends JDBCBase implements Log {
             });
         } catch (Exception e) {
             throw new StorageException(String.format("fail truncate log from index %d", index), e);
+        }
+    }
+
+    @Override
+    public synchronized void removePrefix(final long index) throws StorageException {
+        try {
+            execute(new ConnectionBlock() {
+                @Override
+                public void use(Connection connection) throws Exception {
+                    withStatement(connection, "DELETE FROM entries WHERE log_index<=?", new StatementBlock() {
+                        @Override
+                        public void use(PreparedStatement statement) throws Exception {
+                            statement.setLong(1, index);
+                            statement.execute();
+                        }
+                    });
+                }
+            });
+        } catch (Exception e) {
+            throw new StorageException(String.format("fail remove log prefix up to index %d", index), e);
         }
     }
 

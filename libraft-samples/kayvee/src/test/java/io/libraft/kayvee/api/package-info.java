@@ -26,64 +26,10 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package io.libraft.algorithm;
+/**
+ * Dropwizard service classes.
+ */
+@ParametersAreNonnullByDefault
+package io.libraft.kayvee.api;
 
-import com.google.common.base.Objects;
-
-import javax.annotation.Nullable;
-import java.io.IOException;
-import java.io.OutputStream;
-
-final class UnitTestSnapshotWriter implements SnapshotsStore.ExtendedSnapshotWriter {
-
-    private long term;
-    private long index;
-
-    long getTerm() {
-        return term;
-    }
-
-    @Override
-    public void setTerm(long term) {
-        this.term = term;
-    }
-
-    @Override
-    public long getIndex() {
-        return index;
-    }
-
-    @Override
-    public void setIndex(long index) {
-        this.index = index;
-    }
-
-    @Override
-    public OutputStream getSnapshotOutputStream() throws IOException {
-        return null;
-    }
-
-    @Override
-    public boolean equals(@Nullable Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-
-        UnitTestSnapshotWriter other = (UnitTestSnapshotWriter) o;
-
-        return index == other.index && term == other.term;
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hashCode(term, index);
-    }
-
-    @Override
-    public String toString() {
-        return Objects
-                .toStringHelper(this)
-                .add("term", term)
-                .add("index", index)
-                .toString();
-    }
-}
+import javax.annotation.ParametersAreNonnullByDefault;

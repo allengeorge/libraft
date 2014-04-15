@@ -29,7 +29,7 @@
 package io.libraft.agent.persistence;
 
 import com.google.common.collect.Lists;
-import io.libraft.agent.TestLoggingRule;
+import io.libraft.agent.LoggingRule;
 import io.libraft.algorithm.StorageException;
 import io.libraft.mockjdbc.MockDriver;
 import org.hamcrest.Matchers;
@@ -78,7 +78,7 @@ public final class JDBCBaseTest {
     private static final Logger LOGGER = LoggerFactory.getLogger(JDBCBaseTest.class);
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Rule
     public final ExpectedException expectedException = ExpectedException.none();

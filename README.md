@@ -17,8 +17,8 @@ planned but do not have an implementation timeline.
 
 - [x] Leader election
 - [x] Log replication
-- [o] Log compaction (snapshots)
-- [o] Online cluster reconfiguration
+- [ ] Log compaction (snapshots)
+- [ ] Online cluster reconfiguration
 
 ## Overview
 

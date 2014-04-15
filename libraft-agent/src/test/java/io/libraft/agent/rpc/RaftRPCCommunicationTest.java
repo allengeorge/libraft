@@ -29,8 +29,8 @@
 package io.libraft.agent.rpc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.libraft.agent.LoggingRule;
 import io.libraft.agent.RaftRPCFixture;
-import io.libraft.agent.TestLoggingRule;
 import io.libraft.agent.UnitTestCommandDeserializer;
 import io.libraft.agent.UnitTestCommandSerializer;
 import io.libraft.agent.protocol.RaftRPC;
@@ -77,7 +77,7 @@ public final class RaftRPCCommunicationTest {
     private final AtomicReference<RaftRPC> receivedRpc = new AtomicReference<RaftRPC>(null);
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     private Channel clientChannel;
 

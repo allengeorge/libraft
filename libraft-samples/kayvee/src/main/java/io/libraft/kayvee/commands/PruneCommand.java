@@ -26,40 +26,46 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package io.libraft.agent;
+package io.libraft.kayvee.commands;
 
-import org.junit.rules.TestWatcher;
-import org.junit.runner.Description;
-import org.slf4j.Logger;
+import com.yammer.dropwizard.cli.ConfiguredCommand;
+import com.yammer.dropwizard.config.Bootstrap;
+import io.libraft.agent.snapshots.OnDiskSnapshotsStore;
+import io.libraft.kayvee.configuration.KayVeeConfiguration;
+import net.sourceforge.argparse4j.inf.Namespace;
+import net.sourceforge.argparse4j.inf.Subparser;
+import org.apache.tomcat.jdbc.pool.DataSource;
+import org.skife.jdbi.v2.DBI;
 
-// FIXME (AG): Remove this class and depend on io.libraft.algorithm.TestLoggingRule in libraft-core directly
-//
-// This copy was done because as of gradle 1.8, attempting to publish multiple
-// artifacts from a single sub-project fails with the error:
-// "Publishing is not yet able to resolve a dependency on a project with multiple different publications."
-// Since my testlib only contains one class, it's better to copy this class than create a completely
-// new sub-project to work around this issue.
+public final class PruneCommand extends ConfiguredCommand<KayVeeConfiguration> {
 
-/**
- * Logs when a test starts, and when it finishes.
- */
-public final class TestLoggingRule extends TestWatcher {
+    private static final String NUM_SNAPSHOTS_TO_KEEP = "num-snapshots-to-keep";
 
-    private final Logger logger;
-
-    public TestLoggingRule(Logger logger) {
-        this.logger = logger;
+    public PruneCommand() {
+        super("prune", "prune old snapshots from the snapshots database and the filesystem");
     }
 
     @Override
-    protected void starting(Description description) {
-        logger.info("STARTING:{}", description.getMethodName());
-        super.starting(description);
+    public void configure(Subparser subparser) {
+        super.configure(subparser);
+
+        subparser.addArgument("-n", "--num-snapshots-to-keep")
+                 .dest(NUM_SNAPSHOTS_TO_KEEP)
+                 .help("number of latest snapshots to keep")
+                 .required(true);
     }
 
     @Override
-    protected void finished(Description description) {
-        logger.info("FINISHED:{}", description.getMethodName());
-        super.finished(description);
+    protected void run(Bootstrap<KayVeeConfiguration> bootstrap, Namespace namespace, KayVeeConfiguration configuration) throws Exception {
+        DataSource dataSource = CommandDataSource.newDataSource(configuration);
+        DBI dbi = new DBI(dataSource);
+        OnDiskSnapshotsStore snapshotsStore = new OnDiskSnapshotsStore(dbi, configuration.getSnapshotsConfiguration().getSnapshotsDirectory());
+
+        try {
+            snapshotsStore.initialize();
+            snapshotsStore.pruneSnapshots(namespace.getInt(NUM_SNAPSHOTS_TO_KEEP));
+        } finally {
+            snapshotsStore.teardown();
+        }
     }
 }

@@ -33,7 +33,7 @@ import com.google.common.util.concurrent.SettableFuture;
 import io.libraft.Command;
 import io.libraft.NotLeaderException;
 import io.libraft.agent.RaftAgent;
-import io.libraft.kayvee.TestLoggingRule;
+import io.libraft.kayvee.LoggingRule;
 import io.libraft.kayvee.api.KeyValue;
 import io.libraft.kayvee.api.SetValue;
 import org.hamcrest.Matchers;
@@ -66,7 +66,7 @@ public final class DistributedStoreTest {
     private final RaftAgent raftAgent = mock(RaftAgent.class);
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Rule
     public final ExpectedException expectedException = ExpectedException.none();

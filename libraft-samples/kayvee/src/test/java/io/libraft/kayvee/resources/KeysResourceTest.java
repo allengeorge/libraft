@@ -39,7 +39,7 @@ import com.yammer.dropwizard.jersey.LoggingExceptionMapper;
 import com.yammer.dropwizard.testing.ResourceTest;
 import io.libraft.NotLeaderException;
 import io.libraft.kayvee.KayVeeConfigurationFixture;
-import io.libraft.kayvee.TestLoggingRule;
+import io.libraft.kayvee.LoggingRule;
 import io.libraft.kayvee.api.KeyValue;
 import io.libraft.kayvee.configuration.ClusterMember;
 import io.libraft.kayvee.mappers.IllegalArgumentExceptionMapper;
@@ -115,7 +115,7 @@ public final class KeysResourceTest extends ResourceTest {
     private KeysResource keysResource;
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Override
     protected void setUpResources() throws Exception {

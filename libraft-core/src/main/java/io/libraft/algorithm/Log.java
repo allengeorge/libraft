@@ -86,6 +86,15 @@ public interface Log {
      *
      * @param index index >=0 from which to remove {@code LogEntry} instances
      */
-    void truncate(long index) throws StorageException;
+    void removeSuffix(long index) throws StorageException;
 
+    /**
+     * Remove all {@code LogEntry} instances at log indices <= {@code index},
+     * where index >=0. This operation clears the log if {@code index} is beyond
+     * the end of the log. At the end of this operation the log contains
+     * only entries {@code (index + 1) ... n}.
+     *
+     * @param index index >=0 (inclusive) up to which to remove {@code LogEntry} instances
+     */
+    void removePrefix(long index) throws StorageException;
 }

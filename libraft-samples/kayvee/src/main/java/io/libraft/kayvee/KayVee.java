@@ -38,6 +38,8 @@ import io.libraft.agent.configuration.RaftClusterConfiguration;
 import io.libraft.agent.configuration.RaftConfiguration;
 import io.libraft.agent.configuration.RaftDatabaseConfiguration;
 import io.libraft.agent.configuration.RaftSnapshotsConfiguration;
+import io.libraft.kayvee.commands.PruneCommand;
+import io.libraft.kayvee.commands.ReconcileCommand;
 import io.libraft.kayvee.configuration.ClusterConfiguration;
 import io.libraft.kayvee.configuration.ClusterMember;
 import io.libraft.kayvee.configuration.KayVeeConfiguration;
@@ -68,6 +70,8 @@ public class KayVee extends Service<KayVeeConfiguration> {
     @Override
     public void initialize(Bootstrap<KayVeeConfiguration> bootstrap) {
         bootstrap.setName("kayvee");
+        bootstrap.addCommand(new PruneCommand());
+        bootstrap.addCommand(new ReconcileCommand());
     }
 
     @Override
@@ -78,7 +82,7 @@ public class KayVee extends Service<KayVeeConfiguration> {
         // create and setup the distributed store
         RaftConfiguration raftConfiguration = createRaftConfiguration(configuration);
         DistributedStore distributedStore = new DistributedStore(localStore);
-        RaftAgent raftAgent = RaftAgent.fromConfigurationObject(raftConfiguration, distributedStore); // create the agent
+        RaftAgent raftAgent = RaftAgent.fromConfigurationObject(raftConfiguration, distributedStore);
         raftAgent.setupJacksonAnnotatedCommandSerializationAndDeserialization(KayVeeCommand.class); // setup the agent to deal with our Command subclasses
         distributedStore.setRaftAgent(raftAgent);
         distributedStore.initialize();
@@ -96,7 +100,7 @@ public class KayVee extends Service<KayVeeConfiguration> {
         environment.addProvider(KayVeeExceptionMapper.class);
     }
 
-    private RaftConfiguration createRaftConfiguration(KayVeeConfiguration configuration) {
+    private static RaftConfiguration createRaftConfiguration(KayVeeConfiguration configuration) {
         ClusterConfiguration clusterConfiguration = configuration.getClusterConfiguration();
         Set<RaftMember> raftMembers = Sets.newHashSet();
         for (ClusterMember member : clusterConfiguration.getMembers()) {
@@ -111,9 +115,9 @@ public class KayVee extends Service<KayVeeConfiguration> {
         raftConfiguration.setConnectTimeout(3000);
         raftConfiguration.setMinReconnectInterval(3000);
         raftConfiguration.setAdditionalReconnectIntervalRange(0);
-        raftConfiguration.setMinElectionTimeout(30000);
-        raftConfiguration.setAdditionalElectionTimeoutRange(10000);
-        raftConfiguration.setHeartbeatInterval(7000);
+        raftConfiguration.setMinElectionTimeout(10000);
+        raftConfiguration.setAdditionalElectionTimeoutRange(5000);
+        raftConfiguration.setHeartbeatInterval(200);
         raftConfiguration.setRPCTimeout(1000);
         raftConfiguration.setRaftSnapshotsConfiguration(snapshotsConfiguration);
 

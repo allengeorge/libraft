@@ -30,7 +30,7 @@ package io.libraft.kayvee.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.io.Resources;
-import io.libraft.kayvee.TestLoggingRule;
+import io.libraft.kayvee.LoggingRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -51,7 +51,7 @@ public final class KayVeeKeyValueConversionTest {
     private final ObjectMapper MAPPER = new ObjectMapper();
 
     @Rule
-    public final TestLoggingRule loggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Test
     public void shouldDeserializeJSONObjectAndSetAppropriateParameters()

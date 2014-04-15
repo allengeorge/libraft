@@ -39,7 +39,7 @@ import com.yammer.dropwizard.testing.ResourceTest;
 import io.libraft.NotLeaderException;
 import io.libraft.algorithm.StorageException;
 import io.libraft.kayvee.KayVeeConfigurationFixture;
-import io.libraft.kayvee.TestLoggingRule;
+import io.libraft.kayvee.LoggingRule;
 import io.libraft.kayvee.api.KeyValue;
 import io.libraft.kayvee.api.SetValue;
 import io.libraft.kayvee.configuration.ClusterMember;
@@ -81,7 +81,7 @@ public final class KeyResourceTest extends ResourceTest {
     private final SetValue casValue = new SetValue();
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     private String self;
     private String leader;

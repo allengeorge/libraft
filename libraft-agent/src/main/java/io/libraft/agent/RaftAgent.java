@@ -46,10 +46,11 @@ import io.libraft.agent.configuration.RaftDatabaseConfiguration;
 import io.libraft.agent.configuration.RaftSnapshotsConfiguration;
 import io.libraft.agent.persistence.JDBCLog;
 import io.libraft.agent.persistence.JDBCStore;
-import io.libraft.agent.snapshots.OnDiskSnapshotsStore;
 import io.libraft.agent.protocol.RaftRPC;
 import io.libraft.agent.rpc.RaftNetworkClient;
+import io.libraft.agent.snapshots.OnDiskSnapshotsStore;
 import io.libraft.algorithm.RaftAlgorithm;
+import io.libraft.algorithm.RaftConstants;
 import io.libraft.algorithm.StorageException;
 import org.apache.tomcat.jdbc.pool.DataSource;
 import org.jboss.netty.channel.socket.ClientSocketChannelFactory;
@@ -250,7 +251,9 @@ public class RaftAgent implements Raft {
                 raftClusterConfiguration.getSelf(),
                 getMemberIds(cluster),
                 snapshotsConfiguration.getMinEntriesToSnapshot(),
+                RaftConstants.UNLIMITED_OVERLAP, // FIXME (AG): use actual configuration
                 snapshotsConfiguration.getSnapshotCheckInterval(),
+                RaftConstants.MAX_ENTRIES_PER_APPEND_ENTRIES, // do not want to expose this right now
                 configuration.getRPCTimeout(),
                 configuration.getMinElectionTimeout(),
                 configuration.getAdditionalElectionTimeoutRange(),
@@ -345,10 +348,6 @@ public class RaftAgent implements Raft {
 
         // start up the snapshots subsystem
         snapshotStore.initialize();
-        // check that the snapshot metadata and the filesystem agree
-        // FIXME (AG): this _may_ be expensive, especially if the user never bothers to clean out snapshots!
-        // FIXME (AG): warning, warning - this is upfront work - probably a very, very bad idea
-        snapshotStore.reconcileSnapshots();
 
         // initialize the log and store
         jdbcLog.initialize();

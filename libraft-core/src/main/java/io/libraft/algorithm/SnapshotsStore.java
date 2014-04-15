@@ -73,6 +73,13 @@ public interface SnapshotsStore {
     interface ExtendedSnapshotWriter extends SnapshotWriter {
 
         /**
+         * Get the term of the last committed log entry contained in the snapshot.
+         *
+         * @return term >= 0 in the Raft log of last committed log entry contained in the snapshot
+         */
+        long getTerm();
+
+        /**
          * Set the term of the last committed log entry contained in the snapshot.
          *
          * @param term term >= 0 in the Raft log of last committed log entry contained in the snapshot

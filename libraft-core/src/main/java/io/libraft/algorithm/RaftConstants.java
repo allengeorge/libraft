@@ -131,10 +131,33 @@ public abstract class RaftConstants {
     public static final int SNAPSHOTS_DISABLED = -1;
 
     /**
+     * Constant that signals that an unlimited number of entries.
+     * are allowed to overlap between a snapshot and the log. Practically
+     * speaking, this means that although snapshots are made the
+     * log is never truncated.
+     */
+    public static final int UNLIMITED_OVERLAP = -1;
+
+    /**
      * Initial value returned by {@link io.libraft.SnapshotWriter#getIndex()}.
      * This is an <em>invalid</em> log index.
      */
     public static final long INITIAL_SNAPSHOT_WRITER_LOG_INDEX = -1;
+
+    /**
+     * Maximum number of log entries that a single AppendEntries message contains.
+     * Prevents situations where we waste a lot of local computing resources
+     * serializing entries for a server that's simply unavailable or not keeping up.
+     */
+    public static final int MAX_ENTRIES_PER_APPEND_ENTRIES = 5;
+
+    /**
+     *  Constant that signals that an unlimited number of etnries
+     *  are allowed to be sent in a single AppendEntries message.
+     */
+    public static final int UNLIMITED_ENTRIES_PER_APPEND_ENTRIES = -1;
+
+    public static final int MAX_CHUNK_SIZE = 4096; // bytes, i.e. 4K // FIXME (AG): have the RPCSender tell us this!
 
     // to prevent instantiation of RaftConstants
     private RaftConstants() {}

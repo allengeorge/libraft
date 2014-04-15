@@ -33,9 +33,9 @@ import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
 import io.libraft.agent.ClusterMembersFixture;
+import io.libraft.agent.LoggingRule;
 import io.libraft.agent.RaftAgentConstants;
 import io.libraft.agent.RaftMember;
-import io.libraft.agent.TestLoggingRule;
 import io.libraft.agent.WrappedTimer;
 import io.libraft.algorithm.RPCReceiver;
 import org.jboss.netty.channel.local.DefaultLocalClientChannelFactory;
@@ -69,7 +69,7 @@ public final class RaftNetworkClientSetupTest {
     private RaftNetworkClient raftNetworkClient;
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Before
     public void newRaftNetworkClient() {

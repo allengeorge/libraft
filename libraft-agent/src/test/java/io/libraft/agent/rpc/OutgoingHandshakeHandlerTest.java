@@ -29,7 +29,7 @@
 package io.libraft.agent.rpc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.libraft.agent.TestLoggingRule;
+import io.libraft.agent.LoggingRule;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelFuture;
@@ -87,7 +87,7 @@ public final class OutgoingHandshakeHandlerTest {
     }
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Rule
     public final ExpectedException expectedException = ExpectedException.none();

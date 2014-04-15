@@ -29,6 +29,7 @@
 package io.libraft.algorithm;
 
 import javax.annotation.Nullable;
+import java.io.InputStream;
 import java.util.Collection;
 
 /**
@@ -110,4 +111,8 @@ public interface RPCSender {
      * @see LogEntry
      */
     void appendEntriesReply(String server, long term, long prevLogIndex, long entryCount, boolean applied) throws RPCException;
+
+    void snapshotChunk(String server, long term, long snapshotTerm, long snapshotIndex, int seqnum, @Nullable InputStream chunkInputStream) throws RPCException;
+
+    void snapshotChunkReply(String server, long term, long snapshotTerm, long snapshotIndex, int nextSeqnum) throws RPCException;
 }

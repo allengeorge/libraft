@@ -29,6 +29,7 @@
 package io.libraft.algorithm;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.io.Files;
 import io.libraft.RaftListener;
 import io.libraft.SnapshotWriter;
 import org.hamcrest.Description;
@@ -62,11 +63,12 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
-public final class RaftAlgorithmSnapshotTest {
+public final class RaftAlgorithmTriggerAndStoreSnapshotTest {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RaftAlgorithmTest.class);
 
@@ -87,12 +89,12 @@ public final class RaftAlgorithmSnapshotTest {
     private final InMemoryStore store = new InMemoryStore();
     private final InMemoryLog log = new InMemoryLog();
     private final RaftListener listener = mock(RaftListener.class);
-    private final SnapshotsStore snapshotsStore = mock(SnapshotsStore.class);
+    private final TempFileSnapshotsStore snapshotsStore = spy(new TempFileSnapshotsStore(Files.createTempDir()));
 
     private RaftAlgorithm algorithm;
 
     @Rule
-    public TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     private Matcher<SnapshotWriter> isValidInitialSnapshotWriter() {
         return new TypeSafeMatcher<SnapshotWriter>() {
@@ -117,8 +119,6 @@ public final class RaftAlgorithmSnapshotTest {
     public void setup() throws StorageException {
         LOGGER.info("test seed:{}", seed);
 
-        when(snapshotsStore.newSnapshotWriter()).thenReturn(new UnitTestSnapshotWriter());
-
         algorithm = new RaftAlgorithm(
                 random,
                 timer,
@@ -130,7 +130,9 @@ public final class RaftAlgorithmSnapshotTest {
                 SELF,
                 CLUSTER,
                 5, // snapshot every 5 log entries
+                2, // two entries should overlap
                 SNAPSHOT_CHECK_INTERVAL,
+                10, // send 10 log entries out in every append entries
                 RaftConstants.RPC_TIMEOUT,
                 SNAPSHOT_CHECK_INTERVAL * 10, // since I'm not interested in checking the Raft stuff, set the min election timeout really high
                 0, // don't want any additional time to be added to the min timeout (makes reasoning about tests easier)
@@ -173,9 +175,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 5;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return nothing
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(null);
 
         //
         // situation is as follows:
@@ -234,9 +233,6 @@ public final class RaftAlgorithmSnapshotTest {
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
 
-        // have the snapshot store return nothing
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(null);
-
         //
         // situation is as follows:
         //
@@ -267,7 +263,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndSnapshotExistsAndEnoughLogEntriesHaveBeenGeneratedAndCommitted() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -294,9 +290,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return the snapshot
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
 
         //
         // situation is as follows:
@@ -331,7 +324,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldCallWriteSnapshotRepeatedlyOnListenerWhenSnapshotTimeoutOccursAndSnapshotExistsAndEnoughLogEntriesHaveBeenGeneratedAndCommitted() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -358,9 +351,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return the snapshot repeatedly
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
 
         //
         // situation is as follows:
@@ -440,15 +430,6 @@ public final class RaftAlgorithmSnapshotTest {
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
 
-        // have the snapshot store return:
-        // - null (no snapshots exist)
-        // - snapshot0
-        // - snapshot1
-        // - ...
-        UnitTestSnapshot snapshot0 = new UnitTestSnapshot(1, 5);
-        UnitTestSnapshot snapshot1 = new UnitTestSnapshot(1, 11);
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(null).thenReturn(snapshot0).thenReturn(snapshot1);
-
         //
         // situation is as follows:
         //
@@ -477,6 +458,9 @@ public final class RaftAlgorithmSnapshotTest {
         // check that we didn't change our internal state
         assertThatLogCurrentTermAndCommitIndexHaveValues(entries, currentTerm, commitIndex);
 
+        // pretend that we wrote a snapshot up till index 5
+        storeSnapshot(1, 5);
+
         // --- STEP 2
         //     for some reason the listener only created a snapshot up to 5
         //     committed index = 11
@@ -494,6 +478,9 @@ public final class RaftAlgorithmSnapshotTest {
 
         // check that we didn't change our internal state
         assertThatLogCurrentTermAndCommitIndexHaveValues(entries, currentTerm, commitIndex);
+
+        // pretend that we wrote a snapshot up till index 11 now
+        storeSnapshot(1, 11);
 
         // --- STEP 3
         //     our last snapshot contains up to index 11
@@ -519,9 +506,8 @@ public final class RaftAlgorithmSnapshotTest {
 
     @Test
     public void shouldMakeCorrectSequenceOfWriteSnapshotCallsOnListenerWhenSnapshotTimeoutOccurs() throws StorageException {
-        // first we start off with a snapshot at index 6, then pretend that a new snapshot is created at index 11
-        UnitTestSnapshot snapshot0 = new UnitTestSnapshot(1, 6);
-        UnitTestSnapshot snapshot1 = new UnitTestSnapshot(1, 11);
+        // first we start off with a snapshot at index 6
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -548,14 +534,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 12;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return:
-        // - snapshot0
-        // - snapshot0
-        // - snapshot1
-        // - snapshot1
-        // - ...
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(snapshot0).thenReturn(snapshot0).thenReturn(snapshot1);
 
         //
         // situation is as follows:
@@ -606,6 +584,9 @@ public final class RaftAlgorithmSnapshotTest {
         // check that we didn't change our internal state
         assertThatLogCurrentTermAndCommitIndexHaveValues(entries, currentTerm, commitIndex);
 
+        // OK ... now we add a snapshot till index 11
+        storeSnapshot(1, 11);
+
         // --- STEP 3
         //     our last snapshot contains up to index 11 (for whatever reason)
         //     committed index = 12
@@ -631,7 +612,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndSnapshotExistsAndEnoughLogEntriesHaveBeenGeneratedAndCommittedNoOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -654,9 +635,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return the snapshot
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
 
         //
         // situation is as follows:
@@ -691,8 +669,6 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotCallWriteSnapshotOnListenerIfLogIsEmpty() throws StorageException {
         // we have no snapshots
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(null);
-
         // the starting log (with a sentinel) is enough
 
         // check that we've scheduled a timeout
@@ -716,8 +692,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotCallWriteSnapshotOnListenerIfOnlySnapshotExists() throws StorageException {
         // we have a snapshot that contains data to index 8 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 8L);
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
+        storeSnapshot(1, 8);
 
         // set the current term
         long currentTerm = 1;
@@ -758,6 +733,7 @@ public final class RaftAlgorithmSnapshotTest {
 
     @Test
     public void shouldNotCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndNotEnoughLogEntriesHaveBeenGenerated() throws StorageException {
+        // have the snapshot store return nothing
         // we only have the following log
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
@@ -775,9 +751,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 4;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return nothing
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(null);
 
         //
         // situation is as follows:
@@ -810,7 +783,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndSnapshotExistsAndNotEnoughLogEntriesHaveBeenGenerated() throws StorageException {
         // we have a snapshot that contains data to index 8 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 8L);
+        storeSnapshot(1, 8);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -834,9 +807,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return the snapshot
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
 
         //
         // situation is as follows:
@@ -873,7 +843,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndNotEnoughLogEntriesHaveBeenGeneratedNoOverlap() throws StorageException {
         // we have a snapshot that contains data to index 8 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 8L);
+        storeSnapshot(1, 8);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -891,9 +861,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return the snapshot
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
 
         //
         // situation is as follows:
@@ -927,6 +894,7 @@ public final class RaftAlgorithmSnapshotTest {
 
     @Test
     public void shouldNotCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndNotEnoughLogEntriesHaveBeenCommitted() throws StorageException {
+        // have the snapshot store return nothing
         // we only have the following log
         // we've generated a lot of entries, but simply not committed enough
         final LogEntry[] entries = new LogEntry[] {
@@ -949,9 +917,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 4;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return nothing
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(null);
 
         //
         // situation is as follows:
@@ -984,7 +949,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndSnapshotExistsAndNotEnoughLogEntriesHaveBeenCommitted() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -1011,9 +976,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 7;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return the snapshot
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
 
         //
         // situation is as follows:
@@ -1050,7 +1012,7 @@ public final class RaftAlgorithmSnapshotTest {
         @Test
     public void shouldNotCallWriteSnapshotOnListenerWhenSnapshotTimeoutOccursAndSnapshotExistsAndNotEnoughLogEntriesHaveBeenCommittedNoOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -1073,9 +1035,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 7;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return the snapshot
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
 
         //
         // situation is as follows:
@@ -1109,6 +1068,7 @@ public final class RaftAlgorithmSnapshotTest {
 
     @Test
     public void shouldNotScheduleSnapshotTimeoutAfterAlgorithmStopped() throws StorageException {
+        // have the snapshot store return nothing
         // we start off with a log that has enough generated and committed entries
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
@@ -1136,9 +1096,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return nothing
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(null);
 
         //
         // situation is as follows:
@@ -1223,7 +1180,7 @@ public final class RaftAlgorithmSnapshotTest {
         store.setCommitIndex(commitIndex);
 
         // pretend that the caller handled the request, but set something invalid
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(-1);
 
         boolean exceptionThrown = false;
@@ -1269,7 +1226,7 @@ public final class RaftAlgorithmSnapshotTest {
         store.setCommitIndex(commitIndex);
 
         // pretend that the caller handled the request, but said that they committed more than the commit index but less than the last log index
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(6);
 
         boolean exceptionThrown = false;
@@ -1294,7 +1251,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldThrowIllegalArgumentExceptionIfSnapshotWriterHasIndexGreaterThanCommitIndexAndSnapshotExists() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 7 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -1318,9 +1275,6 @@ public final class RaftAlgorithmSnapshotTest {
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
 
-        // have the snapshot store return the snapshot
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
-
         //
         // situation is as follows:
         //
@@ -1335,7 +1289,7 @@ public final class RaftAlgorithmSnapshotTest {
         //
 
         // pretend that the caller handled the request, but said that they committed more than the commit index but less than the last log index
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(12);
 
         boolean exceptionThrown = false;
@@ -1377,7 +1331,7 @@ public final class RaftAlgorithmSnapshotTest {
         store.setCommitIndex(commitIndex);
 
         // pretend that the caller handled the request, but claimed that they've snapshotted more entries than the log contains!
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(7);
 
         boolean exceptionThrown = false;
@@ -1417,7 +1371,7 @@ public final class RaftAlgorithmSnapshotTest {
         store.setCommitIndex(commitIndex);
 
         // pretend that the caller handled the request, but had processed nothing
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(0);
 
         // submit the handled snapshot request
@@ -1433,7 +1387,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNoopIfSnapshotWriterContainsValidIndexButLogIsNullAndSnapshotExists() throws StorageException {
         // we have a snapshot until index 7
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(new UnitTestSnapshot(3, 7));
+        storeSnapshot(3, 7);
 
         // empty out the log
         clearLog(log);
@@ -1457,7 +1411,7 @@ public final class RaftAlgorithmSnapshotTest {
         //
 
         // pretend that the caller handled the request, but they were trying to create the same snapshot again
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(7);
 
         // submit the handled snapshot request
@@ -1474,6 +1428,7 @@ public final class RaftAlgorithmSnapshotTest {
 
     @Test
     public void shouldNotAddSnapshotIfSnapshotWriterSubmittedWithoutEnoughLogEntriesForLogOnly() throws StorageException {
+        // have the snapshot store return nothing
         // we only have the following log
         final LogEntry[] entries = new LogEntry[]{
                 SENTINEL(),
@@ -1496,9 +1451,6 @@ public final class RaftAlgorithmSnapshotTest {
         long commitIndex = 7;
         store.setCommitIndex(commitIndex);
 
-        // have the snapshot store return nothing
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(null);
-
         //
         // situation is as follows:
         //
@@ -1511,7 +1463,7 @@ public final class RaftAlgorithmSnapshotTest {
         //  SNAPSHOT CREATED TO --+
 
         // pretend that the caller handled the request, but said that they committed less than the minimum number we need to create a snapshot
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(4);
 
         // submit that snapshot request
@@ -1527,7 +1479,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotAddSnapshotIfSnapshotWriterSubmittedWithoutEnoughLogEntriesForLogAndSnapshotNoOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 7 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -1550,9 +1502,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return the snapshot
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
 
         //
         // situation is as follows:
@@ -1570,7 +1519,7 @@ public final class RaftAlgorithmSnapshotTest {
         //
 
         // pretend that the caller handled the request, but said that they committed less than the minimum number we need to create a snapshot
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(10);
 
         // submit that snapshot request
@@ -1586,7 +1535,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotAddSnapshotIfSnapshotWriterSubmittedWithoutEnoughLogEntriesAndLastAppliedIndexInSnapshotForLogAndSnapshotNoOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 7 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -1609,9 +1558,6 @@ public final class RaftAlgorithmSnapshotTest {
         // set the committed index
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
-
-        // have the snapshot store return the snapshot
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
 
         //
         // situation is as follows:
@@ -1630,7 +1576,7 @@ public final class RaftAlgorithmSnapshotTest {
 
         // pretend that the caller handled the request
         // they indicate the same index as what created the initial snapshot
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(6);
 
         // submit that snapshot request
@@ -1649,7 +1595,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotAddSnapshotIfSnapshotWriterSubmittedWithoutEnoughLogEntriesForLogAndSnapshotWithOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -1677,9 +1623,6 @@ public final class RaftAlgorithmSnapshotTest {
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
 
-        // have the snapshot store return the snapshot repeatedly
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
-
         //
         // situation is as follows:
         //
@@ -1699,7 +1642,7 @@ public final class RaftAlgorithmSnapshotTest {
         // if you count from the beginning of the log they have more than enough entries
         // but, what we care about is the number of entries after the end of the last snapshot,
         // which is fewer than the minimum
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(10);
 
         // submit that snapshot request
@@ -1715,7 +1658,7 @@ public final class RaftAlgorithmSnapshotTest {
     @Test
     public void shouldNotAddSnapshotIfSnapshotWriterSubmittedWithoutEnoughLogEntriesAndLastAppliedIndexInSnapshotForLogAndSnapshotWithOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -1743,9 +1686,6 @@ public final class RaftAlgorithmSnapshotTest {
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
 
-        // have the snapshot store return the snapshot repeatedly
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
-
         //
         // situation is as follows:
         //
@@ -1762,7 +1702,7 @@ public final class RaftAlgorithmSnapshotTest {
         //
 
         // pretend that the caller handled the request
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(6);
 
         // submit that snapshot request
@@ -1777,6 +1717,7 @@ public final class RaftAlgorithmSnapshotTest {
 
     @Test
     public void shouldAddSnapshotIfSnapshotWriterSubmittedWithEnoughLogEntriesForLogOnly() throws StorageException {
+        // there are no snapshots
         // we only have the following log
         final LogEntry[] entries = new LogEntry[] {
                 SENTINEL(),
@@ -1801,9 +1742,6 @@ public final class RaftAlgorithmSnapshotTest {
         long commitIndex = 7;
         store.setCommitIndex(commitIndex);
 
-        // have the snapshot store return nothing
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(null);
-
         //
         // situation is as follows:
         //
@@ -1816,7 +1754,7 @@ public final class RaftAlgorithmSnapshotTest {
         //        SNAPSHOT CREATED TO  -----+
 
         // pretend that the caller handled the request, but said that they committed less than the minimum number we need to create a snapshot
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(6);
 
         // submit that snapshot request
@@ -1828,14 +1766,22 @@ public final class RaftAlgorithmSnapshotTest {
         // check that the term is set properly
         assertThat(snapshotWriter.getTerm(), equalTo(1L));
 
-        // and not changed internal state
-        assertThatLogCurrentTermAndCommitIndexHaveValues(entries, currentTerm, commitIndex);
+        // we've stored a new snapshot
+        // and have truncated the log prefix, so now the log should
+        // look as follows
+        final LogEntry[] truncatedEntries = new LogEntry[] {
+                entries[5],
+                entries[6],
+                entries[7],
+                entries[8]
+        };
+        assertThatLogCurrentTermAndCommitIndexHaveValues(truncatedEntries, currentTerm, commitIndex);
     }
 
     @Test
     public void shouldAddSnapshotIfSnapshotWriterSubmittedWithEnoughLogEntriesForLogAndSnapshotNoOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 7 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -1861,9 +1807,6 @@ public final class RaftAlgorithmSnapshotTest {
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
 
-        // have the snapshot store return the snapshot
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
-
         //
         // situation is as follows:
         //
@@ -1880,7 +1823,7 @@ public final class RaftAlgorithmSnapshotTest {
         //
 
         // pretend that the caller handled the request, but said that they committed less than the minimum number we need to create a snapshot
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(11);
 
         // submit that snapshot request
@@ -1892,14 +1835,22 @@ public final class RaftAlgorithmSnapshotTest {
         // check that the term is set properly
         assertThat(snapshotWriter.getTerm(), equalTo(4L));
 
-        // and not changed internal state
-        assertThatLogCurrentTermAndCommitIndexHaveValues(entries, currentTerm, commitIndex);
+        // now that a new snapshot has been added and prefix truncation occurred
+        // we have new entries
+        final LogEntry[] truncatedEntries = new LogEntry[] {
+                entries[3],
+                entries[4],
+                entries[5],
+                entries[6],
+                entries[7],
+        };
+        assertThatLogCurrentTermAndCommitIndexHaveValues(truncatedEntries, currentTerm, commitIndex);
     }
 
     @Test
     public void shouldAddSnapshotIfSnapshotWriterSubmittedWithEnoughLogEntriesForLogAndSnapshotWithOverlap() throws StorageException {
         // we have a snapshot that contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot = new UnitTestSnapshot(1, 6L);
+        storeSnapshot(1, 6);
 
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
@@ -1929,9 +1880,6 @@ public final class RaftAlgorithmSnapshotTest {
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
 
-        // have the snapshot store return the snapshot repeatedly
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot);
-
         //
         // situation is as follows:
         //
@@ -1948,7 +1896,7 @@ public final class RaftAlgorithmSnapshotTest {
         //
 
         // pretend that the caller handled the request
-        UnitTestSnapshotWriter snapshotWriter = new UnitTestSnapshotWriter();
+        UnitTestTempFileSnapshotWriter snapshotWriter = snapshotsStore.newSnapshotWriter();
         snapshotWriter.setIndex(11);
 
         // submit that snapshot request
@@ -1960,13 +1908,23 @@ public final class RaftAlgorithmSnapshotTest {
         // and set the term for that snapshot properly
         assertThat(snapshotWriter.getTerm(), equalTo(4L));
 
-        // and not changed internal state
-        assertThatLogCurrentTermAndCommitIndexHaveValues(entries, currentTerm, commitIndex);
+        // now that a new snapshot has been added and prefix truncation occurred
+        // we have new entries
+        final LogEntry[] truncatedEntries = new LogEntry[] {
+                entries[7],
+                entries[8],
+                entries[9],
+                entries[10],
+                entries[11],
+        };
+        assertThatLogCurrentTermAndCommitIndexHaveValues(truncatedEntries, currentTerm, commitIndex);
     }
 
-    // WARNING: this test is brittle because it is dependent on how many calls to getLatestSnapshot are made within the snapshotWritten method!
     @Test
     public void shouldHandleRepeatedCallsToSnapshotWrittenWithTheSameLastAppliedIndexCorrectly() throws StorageException {
+        // we have a single snapshot
+        storeSnapshot(1, 6);
+
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
                 CLIENT(1, 3, new UnitTestCommand()),
@@ -1995,21 +1953,6 @@ public final class RaftAlgorithmSnapshotTest {
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
 
-        // on the first call we return the existing snapshot: the one than contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot0 = new UnitTestSnapshot(1, 6L);
-
-        // on the first call we return the snapshot created as the result of the first call to "snapshotWritten"
-        SnapshotsStore.ExtendedSnapshot storedSnapshot1 = new UnitTestSnapshot(1, 11L);
-
-        // the first call to snapshotWritten is the only one that modifies the snapshotStore
-        // so, for the first two calls to SnapshotStore.getLatestSnapshot() we have to return the _initial_ state
-        // i.e. as if the SnapshotStore only had storedSnapshot0
-        // the two calls the require the initial state are:
-        //   - RaftAlgorithm.getLatestSnapshot()
-        //   - RaftAlgorithm.snapshotWritten()  <--- the method under test
-        // once the snapshot is written we can repeatedly return the new snapshot
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot0).thenReturn(storedSnapshot0).thenReturn(storedSnapshot1);
-
         //
         // starting situation is as follows:
         //
@@ -2028,18 +1971,22 @@ public final class RaftAlgorithmSnapshotTest {
         // -- CALL 1
         //    the caller should claim that they've created the snapshot
 
-        UnitTestSnapshotWriter snapshotWriter0 = new UnitTestSnapshotWriter();
-        UnitTestSnapshotWriter snapshotWriter1 = new UnitTestSnapshotWriter();
-        when(snapshotsStore.newSnapshotWriter()).thenReturn(snapshotWriter0).thenReturn(snapshotWriter1);
-
         // pretend that the caller handled the request
+        UnitTestTempFileSnapshotWriter snapshotWriter0 = snapshotsStore.newSnapshotWriter();
         snapshotWriter0.setIndex(11);
-
-        // submit that snapshot request
         algorithm.snapshotWritten(snapshotWriter0);
 
-        // after the request is submitted the internal state shouldn't have changed
-        assertThatLogContains(log, entries);
+        // we've stored a new snapshot
+        // and have truncated the log prefix, so now the log should
+        // look as follows (because we've written up to index 11)
+        final LogEntry[] truncatedEntries = new LogEntry[] {
+                entries[7],
+                entries[8],
+                entries[9],
+                entries[10],
+                entries[11],
+        };
+        assertThatLogContains(log, truncatedEntries);
         assertThat(store.getCommitIndex(), equalTo(commitIndex));
 
         //
@@ -2051,7 +1998,7 @@ public final class RaftAlgorithmSnapshotTest {
         //  .. EMPTY .. | 03 | 04 | 05 | 06 | 07 | 08 | 09 | 10 | 11 | 12 | 13 | 14 | (LOG)
         //              ------------------------------------------------------------
         //  ---------------------------------------------------------
-        // |                    LAST APPLIED = 6                    | (SNAPSHOT)
+        // |                   LAST APPLIED = 11                    | (SNAPSHOT)
         // ---------------------------------------------------------
         //                                                        ^
         //                     SNAPSHOT CREATED TO ---------------+
@@ -2062,9 +2009,8 @@ public final class RaftAlgorithmSnapshotTest {
 
         // pretend that the caller handled the second snapshot request
         // and created exactly the same snapshot
+        UnitTestTempFileSnapshotWriter snapshotWriter1 = snapshotsStore.newSnapshotWriter();
         snapshotWriter1.setIndex(11);
-
-        // submit the second snapshot request
         algorithm.snapshotWritten(snapshotWriter1);
 
         //
@@ -2076,17 +2022,19 @@ public final class RaftAlgorithmSnapshotTest {
         verify(snapshotsStore, times(1)).storeSnapshot(snapshotCaptor.capture());
 
         // and it should have the right values
-        UnitTestSnapshotWriter capturedSnapshot = (UnitTestSnapshotWriter) snapshotCaptor.getValue();
+        UnitTestTempFileSnapshotWriter capturedSnapshot = (UnitTestTempFileSnapshotWriter) snapshotCaptor.getValue();
         assertThat(capturedSnapshot.getTerm(), equalTo(4L));
         assertThat(capturedSnapshot.getIndex(), equalTo(11L));
 
         // and not changed internal state
-        assertThatLogCurrentTermAndCommitIndexHaveValues(entries, currentTerm, commitIndex);
+        assertThatLogCurrentTermAndCommitIndexHaveValues(truncatedEntries, currentTerm, commitIndex);
     }
 
-    // WARNING: this test is brittle because it is dependent on how many calls to getLatestSnapshot are made within the snapshotWritten method!
     @Test
     public void shouldHandleOutOfOrderCallsToSnapshotWrittenCorrectly() throws StorageException {
+        // we start off with a single snapshot up to index 6
+        storeSnapshot(1, 6);
+
         // we have a log that contains entries from index 3 onwards
         final LogEntry[] entries = new LogEntry[] {
                 CLIENT(1, 3, new UnitTestCommand()),
@@ -2115,21 +2063,6 @@ public final class RaftAlgorithmSnapshotTest {
         long commitIndex = 11;
         store.setCommitIndex(commitIndex);
 
-        // on the first call we return the existing snapshot: the one than contains data to index 6 (inclusive)
-        SnapshotsStore.ExtendedSnapshot storedSnapshot0 = new UnitTestSnapshot(1, 6L);
-
-        // on the first call we return the snapshot created as the result of the first call to "snapshotWritten"
-        SnapshotsStore.ExtendedSnapshot storedSnapshot1 = new UnitTestSnapshot(1, 11L);
-
-        // the first call to snapshotWritten is the only one that modifies the snapshotStore
-        // so, for the first two calls to SnapshotStore.getLatestSnapshot() we have to return the _initial_ state
-        // i.e. as if the SnapshotStore only had storedSnapshot0
-        // the two calls the require the initial state are:
-        //   - RaftAlgorithm.getLatestSnapshot()
-        //   - RaftAlgorithm.snapshotWritten()  <--- the method under test
-        // once the snapshot is written we can repeatedly return the new snapshot
-        when(snapshotsStore.getLatestSnapshot()).thenReturn(storedSnapshot0).thenReturn(storedSnapshot0).thenReturn(storedSnapshot1);
-
         //
         // starting situation is as follows:
         //
@@ -2148,18 +2081,22 @@ public final class RaftAlgorithmSnapshotTest {
         // -- CALL 1
         //    the caller should claim that they've created the snapshot
 
-        UnitTestSnapshotWriter snapshotWriter0 = new UnitTestSnapshotWriter();
-        UnitTestSnapshotWriter snapshotWriter1 = new UnitTestSnapshotWriter();
-        when(snapshotsStore.newSnapshotWriter()).thenReturn(snapshotWriter0).thenReturn(snapshotWriter1);
-
         // pretend that the caller handled the request
+        UnitTestTempFileSnapshotWriter snapshotWriter0 = snapshotsStore.newSnapshotWriter();
         snapshotWriter0.setIndex(11);
-
-        // submit that snapshot request
         algorithm.snapshotWritten(snapshotWriter0);
 
-        // after the request is submitted the internal state shouldn't have changed
-        assertThatLogContains(log, entries);
+        // we've stored a new snapshot
+        // and have truncated the log prefix, so now the log should
+        // look as follows (because we've written up to index 11)
+        final LogEntry[] truncatedEntries = new LogEntry[] {
+                entries[7],
+                entries[8],
+                entries[9],
+                entries[10],
+                entries[11],
+        };
+        assertThatLogContains(log, truncatedEntries);
         assertThat(store.getCommitIndex(), equalTo(commitIndex));
 
         //
@@ -2171,7 +2108,7 @@ public final class RaftAlgorithmSnapshotTest {
         //  .. EMPTY .. | 03 | 04 | 05 | 06 | 07 | 08 | 09 | 10 | 11 | 12 | 13 | 14 | (LOG)
         //              ------------------------------------------------------------
         //  ---------------------------------------------------------
-        // |                    LAST APPLIED = 6                    | (SNAPSHOT)
+        // |                   LAST APPLIED = 11                    | (SNAPSHOT)
         // ---------------------------------------------------------
         //                                                        ^
         //                     SNAPSHOT CREATED TO ---------------+
@@ -2181,9 +2118,8 @@ public final class RaftAlgorithmSnapshotTest {
         //    act as if the caller created the same snapshot again
 
         // pretend that we got a repeat of the snapshot that created the initial state
+        UnitTestTempFileSnapshotWriter snapshotWriter1 = snapshotsStore.newSnapshotWriter();
         snapshotWriter1.setIndex(6);
-
-        // submit the second snapshot request
         algorithm.snapshotWritten(snapshotWriter1);
 
         //
@@ -2195,17 +2131,28 @@ public final class RaftAlgorithmSnapshotTest {
         verify(snapshotsStore, times(1)).storeSnapshot(snapshotCaptor.capture());
 
         // and it should have the right values
-        UnitTestSnapshotWriter capturedSnapshot = (UnitTestSnapshotWriter) snapshotCaptor.getValue();
+        UnitTestTempFileSnapshotWriter capturedSnapshot = (UnitTestTempFileSnapshotWriter) snapshotCaptor.getValue();
         assertThat(capturedSnapshot.getTerm(), equalTo(4L));
         assertThat(capturedSnapshot.getIndex(), equalTo(11L));
 
         // and not changed internal state
-        assertThatLogCurrentTermAndCommitIndexHaveValues(entries, currentTerm, commitIndex);
+        assertThatLogCurrentTermAndCommitIndexHaveValues(truncatedEntries, currentTerm, commitIndex);
     }
 
     private void assertThatLogCurrentTermAndCommitIndexHaveValues(LogEntry[] entries, long currentTerm, long commitIndex) throws StorageException {
         assertThatLogContains(log, entries);
         assertThat(store.getCurrentTerm(), equalTo(currentTerm));
         assertThat(store.getCommitIndex(), equalTo(commitIndex));
+    }
+
+    private void storeSnapshot(long snapshotTerm, long snapshotIndex) throws StorageException {
+        // create the snapshot
+        ExtendedSnapshotWriter writer = snapshotsStore.newSnapshotWriter();
+        writer.setTerm(snapshotTerm);
+        writer.setIndex(snapshotIndex);
+
+        // write it and reset the interactions we've had with this object so that the tests don't have to account for it
+        snapshotsStore.storeSnapshot(writer);
+        reset(snapshotsStore);
     }
 }

@@ -44,9 +44,9 @@ import static io.libraft.algorithm.UnitTestLogEntries.SENTINEL;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public final class RaftAlgorithmSetupTest {
+public final class RaftAlgorithmInitializationTest {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(RaftAlgorithmSetupTest.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(RaftAlgorithmInitializationTest.class);
 
     private static final String SELF = "0";
 
@@ -62,7 +62,7 @@ public final class RaftAlgorithmSetupTest {
     public final ExpectedException expectedException = ExpectedException.none();
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Test(expected = IllegalArgumentException.class)
     public void shouldNotAcceptClustersSmallerThanThree() {

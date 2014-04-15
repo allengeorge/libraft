@@ -42,7 +42,7 @@ abstract class ResourceConstants {
      * the operation <strong>may</strong> have failed, and the client
      * may choose to retry it.
      */
-    static final int COMMAND_TIMEOUT = 100;
+    static final long COMMAND_TIMEOUT = TimeUnit.MILLISECONDS.convert(30, TimeUnit.SECONDS);
 
     /**
      * Time unit in which timeouts are defined.

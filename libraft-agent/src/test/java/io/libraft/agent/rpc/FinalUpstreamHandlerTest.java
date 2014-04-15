@@ -28,7 +28,7 @@
 
 package io.libraft.agent.rpc;
 
-import io.libraft.agent.TestLoggingRule;
+import io.libraft.agent.LoggingRule;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelHandlerContext;
 import org.jboss.netty.channel.ChannelState;
@@ -56,7 +56,7 @@ public final class FinalUpstreamHandlerTest {
     private final FinalUpstreamHandler handler = new FinalUpstreamHandler("SELF");
 
     @Rule
-    public final TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public final LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Test
     public void shouldDropConnectedEvent() {

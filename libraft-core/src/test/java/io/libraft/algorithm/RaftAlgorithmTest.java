@@ -53,7 +53,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Collection;
-import java.util.List;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -77,7 +76,6 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
-import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
 import static org.hamcrest.Matchers.notNullValue;
@@ -128,7 +126,7 @@ public final class RaftAlgorithmTest {
     public final ExpectedException expectedException = ExpectedException.none();
 
     @Rule
-    public TestLoggingRule testLoggingRule = new TestLoggingRule(LOGGER);
+    public LoggingRule loggingRule = new LoggingRule(LOGGER);
 
     @Before
     public void setup() throws StorageException {
@@ -145,7 +143,9 @@ public final class RaftAlgorithmTest {
                 SELF,
                 CLUSTER,
                 30, // want this to be high enough that the standard tests won't trigger the snapshot, but low enough that testing snapshots isn't onerous
+                RaftConstants.UNLIMITED_OVERLAP, // no truncation
                 RaftConstants.SNAPSHOT_CHECK_INTERVAL,
+                15, // send up to 15 log entries out in every append entries
                 RaftConstants.RPC_TIMEOUT,
                 RaftConstants.MIN_ELECTION_TIMEOUT,
                 0, // don't want any additional time to be added to the min timeout (makes reasoning about tests easier)
@@ -228,19 +228,11 @@ public final class RaftAlgorithmTest {
     }
 
     private <T extends StoringSender.RPCCall> Collection<T> getRPCs(int callCount, Class<T> klass) {
-        List<T> calls = Lists.newArrayListWithCapacity(callCount);
-        for (int i = 0; i < callCount; i++) {
-            calls.add(i, sender.nextAndRemove(klass));
-        }
-        return calls;
+        return RPCCalls.getCallsOfType(sender, callCount, klass);
     }
 
     private Collection<String> getRPCDestinations(Collection<? extends RPCCall> calls) {
-        List<String> destinations = Lists.newArrayListWithCapacity(calls.size());
-        for (RPCCall call : calls) {
-            destinations.add(call.server);
-        }
-        return destinations;
+        return RPCCalls.getDestinations(calls);
     }
 
     private void assertThatRPCsSentTo(Collection<? extends RPCCall> rpcs, String... destinationServers) {
@@ -253,16 +245,16 @@ public final class RaftAlgorithmTest {
 
     private void assertThatRequestVotesHaveValues(Collection<RequestVote> requestVotes, long term, long lastLogTerm, long lastLogIndex) {
         for(RequestVote requestVote : requestVotes) {
-            assertThat(requestVote.term, equalTo(term));
-            assertThat(requestVote.lastLogTerm, equalTo(lastLogTerm));
-            assertThat(requestVote.lastLogIndex, equalTo(lastLogIndex));
+            assertThatRequestVoteHasValues(requestVote, term, lastLogTerm, lastLogIndex);
         }
     }
 
+    private void assertThatRequestVoteHasValues(RequestVote requestVote, long term, long lastLogTerm, long lastLogIndex) {
+        RPCCalls.assertThatRequestVoteHasValues(requestVote, term, lastLogTerm, lastLogIndex);
+    }
+
     private void assertThatRequestVoteReplyHasValues(RequestVoteReply requestVoteReply, String server, long term, boolean voteGranted) {
-        assertThat(requestVoteReply.server, equalTo(server));
-        assertThat(requestVoteReply.term, equalTo(term));
-        assertThat(requestVoteReply.voteGranted, equalTo(voteGranted));
+        RPCCalls.assertThatRequestVoteReplyHasValues(requestVoteReply, server, term, voteGranted);
     }
 
     private void assertThatAppendEntriesHaveValues(Collection<AppendEntries> appendEntries, long term, long commitIndex, long prevLogTerm, long prevLogIndex, LogEntry... entries) {
@@ -271,28 +263,12 @@ public final class RaftAlgorithmTest {
         }
     }
 
-    private void assertThatAppendEntriesHasValues(AppendEntries request, long term, long commitIndex, long prevLogTerm, long prevLogIndex, LogEntry... entries) {
-        assertThat(request.term, equalTo(term));
-        assertThat(request.commitIndex, equalTo(commitIndex));
-        assertThat(request.prevLogTerm, equalTo(prevLogTerm));
-        assertThat(request.prevLogIndex, equalTo(prevLogIndex));
-        if (entries.length == 0) {
-            assertThat(request.entries, nullValue());
-        } else {
-            for (LogEntry entry : entries) {
-                assertThat(entry, notNullValue());
-            }
-            assertThat(request.entries, hasSize(entries.length));
-            assertThat(request.entries, contains(entries));
-        }
+    private void assertThatAppendEntriesHasValues(AppendEntries appendEntries, long term, long commitIndex, long prevLogTerm, long prevLogIndex, LogEntry... entries) {
+        RPCCalls.assertThatAppendEntriesHasValues(appendEntries, term, commitIndex, prevLogTerm, prevLogIndex, entries);
     }
 
     private void assertThatAppendEntriesReplyHasValues(AppendEntriesReply appendEntriesReply, String server, long term, long prevLogIndex, long entryCount, boolean applied) {
-        assertThat(appendEntriesReply.server, equalTo(server));
-        assertThat(appendEntriesReply.term, equalTo(term));
-        assertThat(appendEntriesReply.prevLogIndex, equalTo(prevLogIndex));
-        assertThat(appendEntriesReply.entryCount, equalTo(entryCount));
-        assertThat(appendEntriesReply.applied, equalTo(applied));
+        RPCCalls.assertThatAppendEntriesReplyHasValues(appendEntriesReply, server, term, prevLogIndex, entryCount, applied);
     }
 
     //================================================================================================================//

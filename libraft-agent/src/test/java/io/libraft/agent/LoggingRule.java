@@ -26,13 +26,13 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package io.libraft.kayvee;
+package io.libraft.agent;
 
 import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
 import org.slf4j.Logger;
 
-// FIXME (AG): Remove this class and depend on io.libraft.algorithm.TestLoggingRule in libraft-core directly
+// FIXME (AG): Remove this class and depend on io.libraft.algorithm.LoggingRule in libraft-core directly
 //
 // This copy was done because as of gradle 1.8, attempting to publish multiple
 // artifacts from a single sub-project fails with the error:
@@ -43,11 +43,11 @@ import org.slf4j.Logger;
 /**
  * Logs when a test starts, and when it finishes.
  */
-public final class TestLoggingRule extends TestWatcher {
+public final class LoggingRule extends TestWatcher {
 
     private final Logger logger;
 
-    public TestLoggingRule(Logger logger) {
+    public LoggingRule(Logger logger) {
         this.logger = logger;
     }
 
