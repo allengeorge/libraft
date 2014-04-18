@@ -48,7 +48,8 @@ import java.util.Random;
  * The implementation is based on {@link com.yammer.dropwizard.jersey.LoggingExceptionMapper}.
  * It includes small customizations to the response entity and allows subclasses to set the response code.
  * Unlike {@code LoggingExceptionMapper} it <strong>does not</strong> allow subclasses to format
- * log messages or response entities.
+ * log messages or response entities. The only customization possible is the ability to specify whether
+ * exception stack traces should be logged.
  *
  * @see javax.ws.rs.ext.ExceptionMapper
  * @see com.yammer.dropwizard.jersey.LoggingExceptionMapper
@@ -60,6 +61,7 @@ abstract class KayVeeLoggingExceptionMapper<ExceptionType extends Exception> imp
     private static final Random RANDOM = new Random();
 
     private final UnbrandedErrorHandler errorHandler = new UnbrandedErrorHandler();
+    private final boolean logStacktrace;
 
     /**
      * Request being processed that generated the exception.
@@ -69,8 +71,12 @@ abstract class KayVeeLoggingExceptionMapper<ExceptionType extends Exception> imp
 
     /**
      * Constructor.
+     *
+     * @param logStacktrace true if the exception stack trace should be logged, false otherwise
      */
-    protected KayVeeLoggingExceptionMapper() { }
+    protected KayVeeLoggingExceptionMapper(boolean logStacktrace) {
+        this.logStacktrace = logStacktrace;
+    }
 
     /**
      * Generate an HTTP error response.
@@ -114,7 +120,11 @@ abstract class KayVeeLoggingExceptionMapper<ExceptionType extends Exception> imp
     }
 
     private void logException(long id, ExceptionType exception) {
-        LOGGER.error(formatLogMessage(id), exception);
+        if (logStacktrace) {
+            LOGGER.error(formatLogMessage(id), exception);
+        } else {
+            LOGGER.error("{} message:{}", formatLogMessage(id), exception.getMessage());
+        }
     }
 
     private String formatLogMessage(long id) {

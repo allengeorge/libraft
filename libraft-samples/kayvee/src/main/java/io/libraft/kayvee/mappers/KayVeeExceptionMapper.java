@@ -60,6 +60,13 @@ import static com.google.common.base.Preconditions.checkNotNull;
 @Provider
 public final class KayVeeExceptionMapper extends KayVeeLoggingExceptionMapper<KayVeeException> {
 
+    /**
+     * Constructor.
+     */
+    public KayVeeExceptionMapper() {
+        super(true);
+    }
+
     @Override
     public Response toResponse(KayVeeException cause) {
         Response response;

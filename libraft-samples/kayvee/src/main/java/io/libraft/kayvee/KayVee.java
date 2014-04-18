@@ -44,6 +44,7 @@ import io.libraft.kayvee.configuration.KayVeeConfiguration;
 import io.libraft.kayvee.health.DistributedStoreCheck;
 import io.libraft.kayvee.mappers.IllegalArgumentExceptionMapper;
 import io.libraft.kayvee.mappers.KayVeeExceptionMapper;
+import io.libraft.kayvee.mappers.TimeoutExceptionMapper;
 import io.libraft.kayvee.resources.KeysResource;
 import io.libraft.kayvee.store.DistributedStore;
 import io.libraft.kayvee.store.KayVeeCommand;
@@ -90,6 +91,7 @@ public class KayVee extends Service<KayVeeConfiguration> {
         environment.addResource(new KeysResource(configuration.getClusterConfiguration().getMembers(), distributedStore));
 
         // setup our exception mappers
+        environment.addProvider(TimeoutExceptionMapper.class);
         environment.addProvider(IllegalArgumentExceptionMapper.class);
         environment.addProvider(KayVeeExceptionMapper.class);
     }

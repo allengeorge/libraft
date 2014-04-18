@@ -29,23 +29,24 @@
 package io.libraft.kayvee.mappers;
 
 import javax.ws.rs.core.Response;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Specialization of {@link KayVeeLoggingExceptionMapper} that
- * transforms an {@link IllegalArgumentException} into an HTTP
- * response with a {@code BAD REQUEST} (400) status code.
+ * transforms an {@link TimeoutException} into an HTTP
+ * response with a {@code SERVICE UNAVAILABLE} (503) status code.
  */
-public final class IllegalArgumentExceptionMapper extends KayVeeLoggingExceptionMapper<IllegalArgumentException> {
+public final class TimeoutExceptionMapper extends KayVeeLoggingExceptionMapper<TimeoutException> {
 
     /**
      * Constructor.
      */
-    public IllegalArgumentExceptionMapper() {
-        super(true);
+    public TimeoutExceptionMapper() {
+        super(false);
     }
 
     @Override
-    public Response toResponse(IllegalArgumentException exception) {
-        return newResponse(exception, Response.Status.BAD_REQUEST);
+    public Response toResponse(TimeoutException exception) {
+        return newResponse(exception, Response.Status.SERVICE_UNAVAILABLE);
     }
 }
