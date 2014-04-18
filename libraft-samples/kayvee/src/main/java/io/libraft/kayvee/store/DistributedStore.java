@@ -71,6 +71,7 @@ public class DistributedStore implements Managed, RaftListener {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DistributedStore.class);
     private static final Histogram SUBMIT_COMMAND_HISTOGRAM = Metrics.newHistogram(DistributedStore.class, "submit-command");
+    private static final Histogram ACHIEVE_CONSENSUS_HISTOGRAM = Metrics.newHistogram(DistributedStore.class, "achieve-consensus");
     private static final Histogram APPLY_COMMAND_HISTOGRAM = Metrics.newHistogram(DistributedStore.class, "apply-command");
 
     private class PendingCommandData {
@@ -277,7 +278,7 @@ public class DistributedStore implements Managed, RaftListener {
         // metrics
         long applyCommandInternalStartTime = System.currentTimeMillis();
         if (pendingCommandData != null) {
-            SUBMIT_COMMAND_HISTOGRAM.update(applyCommandInternalStartTime - pendingCommandData.getStartTime());
+            ACHIEVE_CONSENSUS_HISTOGRAM.update(applyCommandInternalStartTime - pendingCommandData.getStartTime());
         }
 
         // actually apply the command
@@ -476,6 +477,7 @@ public class DistributedStore implements Managed, RaftListener {
 
     // IMPORTANT: DO NOT HOLD A LOCK WHEN CALLING issueCommandToCluster OR IN THE onLeadershipChange CALLBACK
     private <T> ListenableFuture<T> issueCommandToCluster(final KayVeeCommand kayVeeCommand) {
+        long submitCommandStartTime = System.currentTimeMillis();
         final SettableFuture<T> returned = SettableFuture.create();
 
         try {
@@ -511,6 +513,8 @@ public class DistributedStore implements Managed, RaftListener {
             });
         } catch (NotLeaderException e) {
             returned.setException(e);
+        } finally {
+            SUBMIT_COMMAND_HISTOGRAM.update(System.currentTimeMillis() - submitCommandStartTime);
         }
 
         return returned;
