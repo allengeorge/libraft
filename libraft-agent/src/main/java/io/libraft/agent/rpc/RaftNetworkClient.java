@@ -121,6 +121,7 @@ public final class RaftNetworkClient implements RPCSender {
     private final int minReconnectInterval;
     private final int additionalReconnectIntervalRange;
     private final TimeUnit timeUnit;
+    private final boolean listenOnAllAddresses;
 
     private volatile boolean running; // set during start/stop and accessed by netty-I/O and RaftNetworkClient caller threads
 
@@ -135,6 +136,7 @@ public final class RaftNetworkClient implements RPCSender {
      * @param timer instance of {@code Timer} used to schedule network timeouts
      * @param mapper instance of {@code ObjectMapper} used to generate JSON representations of {@link RaftRPC} messages
      * @param self unique id of the local Raft server
+     * @param listenOnAllAddresses 'true' if the server socket ignores the address and binds to all
      * @param cluster set of unique ids - one for each Raft server in the cluster
      * @param connectTimeout maximum time {@code RaftNetworkClient} waits to establish a connection to another Raft server
      * @param minReconnectInterval minimum amount of time to wait before reconnecting to a Raft server
@@ -147,6 +149,7 @@ public final class RaftNetworkClient implements RPCSender {
             Timer timer,
             ObjectMapper mapper,
             RaftMember self,
+            boolean listenOnAllAddresses,
             Set<RaftMember> cluster,
             int connectTimeout,
             int minReconnectInterval,
@@ -161,6 +164,7 @@ public final class RaftNetworkClient implements RPCSender {
         this.timer = timer;
         this.mapper = mapper;
         this.self = self;
+        this.listenOnAllAddresses = listenOnAllAddresses;
         this.connectTimeout = connectTimeout;
         this.minReconnectInterval = minReconnectInterval;
         this.additionalReconnectIntervalRange = additionalReconnectIntervalRange;
@@ -274,7 +278,9 @@ public final class RaftNetworkClient implements RPCSender {
 
         if (bindAddress instanceof InetSocketAddress) {
             InetSocketAddress inetBindAddress = (InetSocketAddress) bindAddress;
-            if (inetBindAddress.isUnresolved()) {
+            if (listenOnAllAddresses) {
+            	bindAddress = new InetSocketAddress(inetBindAddress.getPort());
+            } else if (inetBindAddress.isUnresolved()) {
                 bindAddress = new InetSocketAddress(inetBindAddress.getHostName(), inetBindAddress.getPort());
             }
         }

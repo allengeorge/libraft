@@ -63,4 +63,10 @@ public abstract class RaftAgentConstants {
      * a successful connection to a Raft server.
      */
     public static final int CONNECT_TIMEOUT = 5000;
+    
+    /**
+     * Indicates whether the local server's listener should listen
+     * on all addresses or only on the specified address
+     */
+    public static final boolean ALL_ADDRESSES = false;
 }
