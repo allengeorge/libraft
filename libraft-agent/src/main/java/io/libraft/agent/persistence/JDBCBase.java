@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -123,7 +124,7 @@ abstract class JDBCBase {
             checkNotNull(statement);
             try {
                 try {
-                    addDatabaseCreateStatementsToBatch(statement);
+                    addDatabaseCreateStatementsToBatch(statement, connection.getMetaData());
                     statement.executeBatch();
                 } finally {
                     closeSilently(statement);
@@ -159,7 +160,7 @@ abstract class JDBCBase {
         return initialized;
     }
 
-    protected abstract void addDatabaseCreateStatementsToBatch(Statement statement) throws Exception;
+    protected abstract void addDatabaseCreateStatementsToBatch(Statement batchStatement, DatabaseMetaData metadata) throws Exception;
 
     private void setupConnection() throws SQLException {
         if (connection == null) {

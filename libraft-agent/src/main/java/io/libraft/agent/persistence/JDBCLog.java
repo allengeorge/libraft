@@ -42,6 +42,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -128,11 +129,16 @@ public final class JDBCLog extends JDBCBase implements Log {
     }
 
     @Override
-    protected void addDatabaseCreateStatementsToBatch(Statement statement) throws SQLException {
+    protected void addDatabaseCreateStatementsToBatch(Statement batchStatement, DatabaseMetaData metadata) throws SQLException {
         LOGGER.info("setup raft log");
-
-        statement.addBatch("CREATE TABLE IF NOT EXISTS entries(log_index BIGINT PRIMARY KEY, term BIGINT NOT NULL, type TINYINT NOT NULL, data BLOB DEFAULT NULL)");
-        statement.addBatch("CREATE INDEX IF NOT EXISTS entries_index ON entries(log_index DESC)");
+        
+        try (ResultSet rs = metadata.getTables(null, null, "ENTRIES", null)) {
+        	if (! rs.next()) {
+        		batchStatement.addBatch("CREATE TABLE entries(log_index BIGINT PRIMARY KEY, term BIGINT NOT NULL, "
+                		+ "type SMALLINT NOT NULL, data BLOB DEFAULT NULL)");
+        		batchStatement.addBatch("CREATE INDEX entries_index ON entries(log_index DESC)");
+        	}
+        }
     }
 
     @Override

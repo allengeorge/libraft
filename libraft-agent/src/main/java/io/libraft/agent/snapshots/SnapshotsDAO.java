@@ -30,6 +30,7 @@ package io.libraft.agent.snapshots;
 
 import org.skife.jdbi.v2.ResultIterator;
 import org.skife.jdbi.v2.StatementContext;
+import org.skife.jdbi.v2.exceptions.UnableToExecuteStatementException;
 import org.skife.jdbi.v2.sqlobject.Bind;
 import org.skife.jdbi.v2.sqlobject.BindBean;
 import org.skife.jdbi.v2.sqlobject.SqlQuery;
@@ -68,8 +69,12 @@ abstract class SnapshotsDAO {
      */
     @Transaction
     void createSnapshotsTableWithIndex() {
-        createSnapshotsTable();
-        createTimestampIndexForSnapshotsTable();
+    	try {
+          createSnapshotsTable();
+          createTimestampIndexForSnapshotsTable();
+    	} catch(UnableToExecuteStatementException e) {
+    		// nada
+    	}
     }
 
     /**
@@ -77,13 +82,13 @@ abstract class SnapshotsDAO {
      */
     // FIXME (AG): I'm essentially using the timestamp as a primary key
     // I did this is because auto-increment indices have different syntaxes in different dbs - might be best to create an explicit index
-    @SqlUpdate("create table if not exists snapshots(filename varchar(255) not null, ts bigint unique, last_term bigint not null, last_index bigint not null)")
+    @SqlUpdate("create table snapshots(filename varchar(255) not null, ts bigint unique, last_term bigint not null, last_index bigint not null)")
     abstract void createSnapshotsTable();
 
     /**
      * Create the index for the {@code snapshots} table.
      */
-    @SqlUpdate("create index if not exists ts_index on snapshots(ts)")
+    @SqlUpdate("create index ts_index on snapshots(ts)")
     abstract void createTimestampIndexForSnapshotsTable();
 
     /**

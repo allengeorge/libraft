@@ -33,6 +33,7 @@ import io.libraft.algorithm.Store;
 
 import javax.annotation.Nullable;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -95,12 +96,24 @@ public final class JDBCStore extends JDBCBase implements Store {
     }
 
     @Override
-    protected void addDatabaseCreateStatementsToBatch(Statement statement) throws SQLException {
+    protected void addDatabaseCreateStatementsToBatch(Statement batchStatement, DatabaseMetaData metadata) throws SQLException {
         LOGGER.info("setup raft store");
+        try (ResultSet rs = metadata.getTables(null, null, "CURRENT_TERM", null)) {
+        	if (! rs.next()) {
+                batchStatement.addBatch("CREATE TABLE current_term(term BIGINT NOT NULL)");
+        	}
+        }
+        try (ResultSet rs = metadata.getTables(null, null, "COMMIT_INDEX", null)) {
+        	if (! rs.next()) {
+                batchStatement.addBatch("CREATE TABLE commit_index(commit_index BIGINT NOT NULL)");
+        	}
+        }
+        try (ResultSet rs = metadata.getTables(null, null, "VOTED_FOR", null)) {
+        	if (! rs.next()) {
+                batchStatement.addBatch("CREATE TABLE voted_for(term BIGINT NOT NULL, server VARCHAR(128) DEFAULT NULL)");
+        	}
+        }
 
-        statement.addBatch("CREATE TABLE IF NOT EXISTS current_term(term BIGINT NOT NULL)");
-        statement.addBatch("CREATE TABLE IF NOT EXISTS commit_index(commit_index BIGINT NOT NULL)");
-        statement.addBatch("CREATE TABLE IF NOT EXISTS voted_for(term BIGINT NOT NULL, server VARCHAR(128) DEFAULT NULL)");
     }
 
     private Long queryAndCheckConsistency(PreparedStatement statement, final String tableName) throws Exception {
