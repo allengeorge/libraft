@@ -73,6 +73,7 @@ public final class RaftConfiguration {
     private static final String SNAPSHOTS = "snapshots";
     private static final String DATABASE = "database";
     private static final String CLUSTER = "cluster";
+    private static final String ALL_ADDRESSES = "allAddresses";
 
     @Min(1)
     @Max(RaftConfigurationConstants.SIXTY_SECONDS)
@@ -115,6 +116,10 @@ public final class RaftConfiguration {
     @NotNull
     @JsonProperty(ADDITIONAL_RECONNECT_INTERVAL_RANGE)
     private int additionalReconnectIntervalRange = RaftAgentConstants.ADDITIONAL_RECONNECT_INTERVAL_RANGE;
+    
+    @NotNull
+    @JsonProperty(ALL_ADDRESSES)
+    private boolean allAddresses = RaftAgentConstants.ALL_ADDRESSES;
 
     @JsonIgnore
     private final TimeUnit timeUnit = RaftConfigurationConstants.DEFAULT_TIME_UNIT;
@@ -330,6 +335,16 @@ public final class RaftConfiguration {
     public int getAdditionalReconnectIntervalRange() {
         return additionalReconnectIntervalRange;
     }
+    
+    /**
+     * Get a flag indicating whether the local server should listen on all addresses 
+     * or on the specified one only
+     * 
+     * @return the all-addresses flag
+     */
+    public boolean getAllAddresses() {
+    	return allAddresses;
+    }
 
     /**
      * Set the maximum additional amount of time added to
@@ -342,6 +357,16 @@ public final class RaftConfiguration {
      */
     public void setAdditionalReconnectIntervalRange(int additionalReconnectIntervalRange) {
         this.additionalReconnectIntervalRange = additionalReconnectIntervalRange;
+    }
+    
+    /**
+     * Set the flag indicating whether the local server listens on all addresses
+     * or not
+     * 
+     * @param aa the all-addresses value
+     */
+    public void setAllAddresses(boolean aa) {
+    	this.allAddresses = aa;
     }
 
     /**
@@ -406,7 +431,8 @@ public final class RaftConfiguration {
                 && additionalReconnectIntervalRange == other.additionalReconnectIntervalRange
                 && raftDatabaseConfiguration.equals(other.raftDatabaseConfiguration)
                 && raftSnapshotsConfiguration.equals(other.raftSnapshotsConfiguration)
-                && raftClusterConfiguration.equals(other.raftClusterConfiguration);
+                && raftClusterConfiguration.equals(other.raftClusterConfiguration)
+                && allAddresses == other.allAddresses;
     }
 
     @Override
@@ -422,7 +448,8 @@ public final class RaftConfiguration {
                 additionalReconnectIntervalRange,
                 raftDatabaseConfiguration,
                 raftSnapshotsConfiguration,
-                raftClusterConfiguration
+                raftClusterConfiguration,
+                allAddresses
         );
     }
 
@@ -441,6 +468,7 @@ public final class RaftConfiguration {
                 .add(DATABASE, raftDatabaseConfiguration)
                 .add(SNAPSHOTS, raftSnapshotsConfiguration)
                 .add(CLUSTER, raftClusterConfiguration)
+                .add(ALL_ADDRESSES, allAddresses)
                 .toString();
     }
 }

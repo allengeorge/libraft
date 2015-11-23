@@ -33,6 +33,7 @@ import io.libraft.algorithm.Store;
 
 import javax.annotation.Nullable;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -95,12 +96,32 @@ public final class JDBCStore extends JDBCBase implements Store {
     }
 
     @Override
-    protected void addDatabaseCreateStatementsToBatch(Statement statement) throws SQLException {
+    protected void addDatabaseCreateStatementsToBatch(Statement batchStatement, DatabaseMetaData metadata) throws SQLException {
         LOGGER.info("setup raft store");
+        try (ResultSet rs = metadata.getTables(null, null, "CURRENT_TERM", null)) {
+        	if (! rs.next()) {
+                batchStatement.addBatch("CREATE TABLE current_term(term BIGINT NOT NULL)");
+                batchStatement.addBatch("INSERT INTO current_term (term) VALUES (-1)");
+        	}
+        }
+        try (ResultSet rs = metadata.getTables(null, null, "COMMIT_INDEX", null)) {
+        	if (! rs.next()) {
+                batchStatement.addBatch("CREATE TABLE commit_index(commit_index BIGINT NOT NULL)");
+                batchStatement.addBatch("INSERT INTO commit_index (commit_index) VALUES (-1)");
+        	}
+        }
+        try (ResultSet rs = metadata.getTables(null, null, "VOTED_FOR", null)) {
+        	if (! rs.next()) {
+                batchStatement.addBatch("CREATE TABLE voted_for(term BIGINT NOT NULL, server VARCHAR(128) DEFAULT NULL)");
+                batchStatement.addBatch("INSERT INTO voted_for(term) VALUES (-1)");
+        	}
+        }
 
-        statement.addBatch("CREATE TABLE IF NOT EXISTS current_term(term BIGINT NOT NULL)");
-        statement.addBatch("CREATE TABLE IF NOT EXISTS commit_index(commit_index BIGINT NOT NULL)");
-        statement.addBatch("CREATE TABLE IF NOT EXISTS voted_for(term BIGINT NOT NULL, server VARCHAR(128) DEFAULT NULL)");
+    }
+    
+    @Override
+    protected void initializeDatabase(Connection connection) throws SQLException {
+    	// do nothing
     }
 
     private Long queryAndCheckConsistency(PreparedStatement statement, final String tableName) throws Exception {
@@ -118,12 +139,16 @@ public final class JDBCStore extends JDBCBase implements Store {
     @Override
     public synchronized long getCurrentTerm() throws StorageException {
         try {
-            return executeQuery("SELECT term FROM current_term", new StatementWithReturnBlock<Long>() {
+            long rtn = executeQuery("SELECT term FROM current_term", new StatementWithReturnBlock<Long>() {
                 @Override
                 public @Nullable Long use(PreparedStatement statement) throws Exception {
                     return queryAndCheckConsistency(statement, "current_term");
                 }
             });
+            if (rtn < 0) {
+            	throw new RuntimeException("Current term not set");
+            }
+            return rtn;
         } catch (Exception e) {
             throw new StorageException("fail get currentTerm", e);
         }
@@ -135,23 +160,6 @@ public final class JDBCStore extends JDBCBase implements Store {
             execute(new ConnectionBlock() {
                 @Override
                 public void use(Connection connection) throws Exception {
-                    boolean doUpdate = withStatement(connection, "SELECT COUNT(*) FROM current_term", new StatementWithReturnBlock<Boolean>() {
-                        @Override
-                        public Boolean use(PreparedStatement statement) throws Exception {
-                            return withResultSet(statement, new ResultSetBlock<Boolean>() {
-                                @Override
-                                public Boolean use(ResultSet resultSet) throws Exception {
-                                    resultSet.next(); // COUNT(*) should always return a value
-
-                                    int count = resultSet.getInt(1);
-                                    checkState(count == 0 || count == 1, "current_term: too many rows:%s", count);
-
-                                    return count == 1;
-                                }
-                            });
-                        }
-                    });
-                    if (doUpdate) {
                         withStatement(connection, "UPDATE current_term SET term=?", new StatementBlock() {
                             @Override
                             public void use(PreparedStatement statement) throws Exception {
@@ -160,16 +168,6 @@ public final class JDBCStore extends JDBCBase implements Store {
                                 checkState(rowsUpdated == 1, "commit_index: too many rows:%s)", rowsUpdated);
                             }
                         });
-                    } else {
-                        withStatement(connection, "INSERT INTO current_term VALUES(?)", new StatementBlock() {
-                            @Override
-                            public void use(PreparedStatement statement) throws Exception {
-                                statement.setLong(1, term);
-                                int rowsUpdated = statement.executeUpdate();
-                                checkState(rowsUpdated == 1, "commit_index: too many rows:%s)", rowsUpdated);
-                            }
-                        });
-                    }
                 }
             });
         } catch (Exception e) {
@@ -180,12 +178,16 @@ public final class JDBCStore extends JDBCBase implements Store {
     @Override
     public synchronized long getCommitIndex() throws StorageException {
         try {
-            return executeQuery("SELECT commit_index FROM commit_index", new StatementWithReturnBlock<Long>() {
+            long rtn = executeQuery("SELECT commit_index FROM commit_index", new StatementWithReturnBlock<Long>() {
                 @Override
                 public @Nullable Long use(PreparedStatement statement) throws Exception {
                     return queryAndCheckConsistency(statement, "commit_index");
                 }
             });
+            if (rtn < 0) {
+            	throw new RuntimeException("Commit index not set");
+            }
+            return rtn;
         } catch (Exception e) {
             throw new StorageException("fail get commitIndex", e);
         }
@@ -197,23 +199,6 @@ public final class JDBCStore extends JDBCBase implements Store {
             execute(new ConnectionBlock() {
                 @Override
                 public void use(Connection connection) throws Exception {
-                    boolean doUpdate = withStatement(connection, "SELECT COUNT(*) FROM commit_index", new StatementWithReturnBlock<Boolean>() {
-                        @Override
-                        public Boolean use(PreparedStatement statement) throws Exception {
-                            return withResultSet(statement, new ResultSetBlock<Boolean>() {
-                                @Override
-                                public Boolean use(ResultSet resultSet) throws Exception {
-                                    resultSet.next(); // COUNT(*) should always return a value
-
-                                    int count = resultSet.getInt(1);
-                                    checkState(count == 0 || count == 1, "commit_index: too many rows:%s", count);
-
-                                    return count == 1;
-                                }
-                            });
-                        }
-                    });
-                    if (doUpdate) {
                         withStatement(connection, "UPDATE commit_index SET commit_index=?", new StatementBlock() {
                             @Override
                             public void use(PreparedStatement statement) throws Exception {
@@ -222,16 +207,6 @@ public final class JDBCStore extends JDBCBase implements Store {
                                 checkState(rowsUpdated == 1, "commit_index: too many rows:%s)", rowsUpdated);
                             }
                         });
-                    } else {
-                        withStatement(connection, "INSERT INTO commit_index VALUES(?)", new StatementBlock() {
-                            @Override
-                            public void use(PreparedStatement statement) throws Exception {
-                                statement.setLong(1, logIndex);
-                                int rowsUpdated = statement.executeUpdate();
-                                checkState(rowsUpdated == 1, "commit_index: too many rows:%s)", rowsUpdated);
-                            }
-                        });
-                    }
                 }
             });
         } catch (Exception e) {

@@ -234,6 +234,7 @@ public class RaftAgent implements Raft {
                 timer,
                 mapper,
                 getSelfAsMember(raftClusterConfiguration.getSelf(), cluster),
+                configuration.getAllAddresses(),
                 cluster,
                 configuration.getConnectTimeout(),
                 configuration.getMinReconnectInterval(),
