@@ -126,6 +126,7 @@ abstract class JDBCBase {
                 try {
                     addDatabaseCreateStatementsToBatch(statement, connection.getMetaData());
                     statement.executeBatch();
+                    initializeDatabase(connection);
                 } finally {
                     closeSilently(statement);
                 }
@@ -161,6 +162,7 @@ abstract class JDBCBase {
     }
 
     protected abstract void addDatabaseCreateStatementsToBatch(Statement batchStatement, DatabaseMetaData metadata) throws Exception;
+    protected abstract void initializeDatabase(Connection connection) throws Exception;
 
     private void setupConnection() throws SQLException {
         if (connection == null) {

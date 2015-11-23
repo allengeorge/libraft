@@ -55,7 +55,7 @@ import static com.google.common.base.Preconditions.checkState;
 /**
  * Implementation of {@code Log} that uses a JDBC backend.
  * <p/>
- * This implementation creates and uses a single table called {@code log_index} with the following structure:
+ * This implementation creates and uses a single table called {@code entries} with the following structure:
  * <pre>
  * +-----------+-----------+----------+----------+
  * | log_index |   term    |   type   |   data   |
@@ -139,6 +139,11 @@ public final class JDBCLog extends JDBCBase implements Log {
         		batchStatement.addBatch("CREATE INDEX entries_index ON entries(log_index DESC)");
         	}
         }
+    }
+    
+    @Override
+    protected void initializeDatabase(Connection connection) throws Exception {
+    	// no special initialization required
     }
 
     @Override
